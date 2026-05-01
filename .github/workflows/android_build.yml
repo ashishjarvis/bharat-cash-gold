@@ -9,6 +9,10 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -19,64 +23,60 @@ jobs:
           java-version: '21'
           distribution: 'temurin'
 
-      - name: Install Node.js 22
+      - name: Install Node.js 24
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
+          cache: 'npm'
 
       - name: Install Dependencies
-        run: npm install --force
+        run: npm install --legacy-peer-deps
 
       - name: Build Web Project
         run: npm run build
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL || 'https://ylbuuvimelaariosriwk.supabase.co' }}
+          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlsYnV1dmltZWxhYXJpb3NyaXdrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk2NTE1MjksImV4cCI6MjA4NTIyNzUyOX0.G9bmLzE2ScnNJAJvZm1ApuwzDeT-G23k7MbP1V0W-zY' }}
 
-      - name: Capacitor Init & Sync
+      - name: Add Android Platform
         run: |
-          npx cap add android || true
+          npx cap add android 2>/dev/null || echo "Android platform already exists"
           npx cap sync android
 
-      - name: Add Unity Ads SDK to Android
+      - name: Make Gradlew Executable
+        run: chmod +x android/gradlew
+
+      - name: Add Unity Ads SDK to Android Gradle
         run: |
-          # Inject Unity Ads Maven repository into android/build.gradle
-          GRADLE_FILE="android/build.gradle"
-          if [ -f "$GRADLE_FILE" ]; then
-            sed -i '/allprojects {/,/repositories {/ {
-              /repositories {/ a\        maven { url "https://storage.googleapis.com/unity-ads-android/sdk/" }
-            }' "$GRADLE_FILE"
+          # Add Unity Ads Maven repo to project-level build.gradle
+          GRADLE="android/build.gradle"
+          if [ -f "$GRADLE" ] && ! grep -q "unity-ads" "$GRADLE"; then
+            sed -i 's|mavenCentral()|mavenCentral()\n        maven { url "https://storage.googleapis.com/unity-ads-android/sdk/" }|g' "$GRADLE"
           fi
 
-          # Add Unity Ads dependency to android/app/build.gradle
+          # Add Unity Ads dependency to app-level build.gradle
           APP_GRADLE="android/app/build.gradle"
-          if [ -f "$APP_GRADLE" ]; then
-            sed -i '/dependencies {/ a\    implementation "com.unity3d.ads:unity-ads:4.12.4"' "$APP_GRADLE"
+          if [ -f "$APP_GRADLE" ] && ! grep -q "unity-ads" "$APP_GRADLE"; then
+            sed -i '/^dependencies {/a\    implementation "com.unity3d.ads:unity-ads:4.12.4"' "$APP_GRADLE"
           fi
 
-      - name: Add capacitor-unity-ads plugin to Android
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ hashFiles('android/**/*.gradle*', 'android/**/gradle-wrapper.properties') }}
+          restore-keys: gradle-
+
+      - name: Build Debug APK
         run: |
           cd android
-          # Ensure the capacitor-unity-ads plugin is synced
-          npx cap sync android 2>/dev/null || true
+          ./gradlew assembleDebug --no-daemon --stacktrace
 
-      - name: Enable ProGuard for Release
-        run: |
-          APP_GRADLE="android/app/build.gradle"
-          if grep -q "minifyEnabled false" "$APP_GRADLE"; then
-            sed -i 's/minifyEnabled false/minifyEnabled true/g' "$APP_GRADLE"
-            sed -i 's/shrinkResources false/shrinkResources true/g' "$APP_GRADLE"
-          fi
-
-      - name: Build ARM64 Release APK
-        run: |
-          cd android
-          ./gradlew assembleRelease \
-            -Pandroid.injected.signing.store.file="" \
-            --stacktrace 2>/dev/null || ./gradlew assembleDebug
-
-      - name: Upload APK Artifact
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: Bharat-Cash-Gold-APK
-          path: |
-            android/app/build/outputs/apk/release/*.apk
-            android/app/build/outputs/apk/debug/*.apk
+          path: android/app/build/outputs/apk/debug/*.apk
           retention-days: 30
