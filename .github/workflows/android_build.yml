@@ -27,7 +27,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 24
-          cache: 'npm'
+          # cache removed — no package-lock.json required
 
       - name: Install Dependencies
         run: npm install --legacy-peer-deps
@@ -35,29 +35,32 @@ jobs:
       - name: Build Web Project
         run: npm run build
         env:
-          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL || 'https://ylbuuvimelaariosriwk.supabase.co' }}
-          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlsYnV1dmltZWxhYXJpb3NyaXdrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk2NTE1MjksImV4cCI6MjA4NTIyNzUyOX0.G9bmLzE2ScnNJAJvZm1ApuwzDeT-G23k7MbP1V0W-zY' }}
+          VITE_SUPABASE_URL: https://ylbuuvimelaariosriwk.supabase.co
+          VITE_SUPABASE_PUBLISHABLE_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlsYnV1dmltZWxhYXJpb3NyaXdrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk2NTE1MjksImV4cCI6MjA4NTIyNzUyOX0.G9bmLzE2ScnNJAJvZm1ApuwzDeT-G23k7MbP1V0W-zY
 
       - name: Add Android Platform
         run: |
-          npx cap add android 2>/dev/null || echo "Android platform already exists"
+          npx cap add android 2>/dev/null || echo "Android already exists"
           npx cap sync android
 
       - name: Make Gradlew Executable
         run: chmod +x android/gradlew
 
-      - name: Add Unity Ads SDK to Android Gradle
+      - name: Inject Unity Ads SDK into Gradle
         run: |
-          # Add Unity Ads Maven repo to project-level build.gradle
           GRADLE="android/build.gradle"
+          APP_GRADLE="android/app/build.gradle"
+
+          # Add Unity Ads Maven repo (only once)
           if [ -f "$GRADLE" ] && ! grep -q "unity-ads" "$GRADLE"; then
             sed -i 's|mavenCentral()|mavenCentral()\n        maven { url "https://storage.googleapis.com/unity-ads-android/sdk/" }|g' "$GRADLE"
+            echo "✅ Added Unity Ads Maven repo"
           fi
 
-          # Add Unity Ads dependency to app-level build.gradle
-          APP_GRADLE="android/app/build.gradle"
+          # Add Unity Ads dependency (only once)
           if [ -f "$APP_GRADLE" ] && ! grep -q "unity-ads" "$APP_GRADLE"; then
             sed -i '/^dependencies {/a\    implementation "com.unity3d.ads:unity-ads:4.12.4"' "$APP_GRADLE"
+            echo "✅ Added Unity Ads dependency"
           fi
 
       - name: Cache Gradle
@@ -66,13 +69,16 @@ jobs:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: gradle-${{ hashFiles('android/**/*.gradle*', 'android/**/gradle-wrapper.properties') }}
-          restore-keys: gradle-
+          key: ${{ runner.os }}-gradle-${{ hashFiles('android/**/*.gradle*') }}
+          restore-keys: ${{ runner.os }}-gradle-
 
       - name: Build Debug APK
         run: |
           cd android
-          ./gradlew assembleDebug --no-daemon --stacktrace
+          ./gradlew assembleDebug \
+            --no-daemon \
+            --stacktrace \
+            -Dorg.gradle.jvmargs="-Xmx2g -XX:MaxMetaspaceSize=512m"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
