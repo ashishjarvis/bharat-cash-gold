@@ -5,13 +5,14 @@ on:
   push:
     branches: [main]
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  ANDROID_HOME: /usr/local/lib/android/sdk
+  ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+
 jobs:
   build:
     runs-on: ubuntu-latest
-
-    env:
-      ANDROID_HOME: /usr/local/lib/android/sdk
-      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
 
     steps:
       - name: Checkout Code
@@ -27,7 +28,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 24
-          # cache removed — no package-lock.json required
 
       - name: Install Dependencies
         run: npm install --legacy-peer-deps
@@ -40,7 +40,7 @@ jobs:
 
       - name: Add Android Platform
         run: |
-          npx cap add android 2>/dev/null || echo "Android already exists"
+          npx cap add android 2>/dev/null || echo "Android platform already added"
           npx cap sync android
 
       - name: Make Gradlew Executable
@@ -50,17 +50,13 @@ jobs:
         run: |
           GRADLE="android/build.gradle"
           APP_GRADLE="android/app/build.gradle"
-
-          # Add Unity Ads Maven repo (only once)
           if [ -f "$GRADLE" ] && ! grep -q "unity-ads" "$GRADLE"; then
             sed -i 's|mavenCentral()|mavenCentral()\n        maven { url "https://storage.googleapis.com/unity-ads-android/sdk/" }|g' "$GRADLE"
-            echo "✅ Added Unity Ads Maven repo"
+            echo "Added Unity Ads Maven repo"
           fi
-
-          # Add Unity Ads dependency (only once)
           if [ -f "$APP_GRADLE" ] && ! grep -q "unity-ads" "$APP_GRADLE"; then
             sed -i '/^dependencies {/a\    implementation "com.unity3d.ads:unity-ads:4.12.4"' "$APP_GRADLE"
-            echo "✅ Added Unity Ads dependency"
+            echo "Added Unity Ads dependency"
           fi
 
       - name: Cache Gradle
