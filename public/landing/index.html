@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Bharat Cash Gold — Earn Real Money</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #0a0a0f;
+      color: #fff;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    .logo { font-size: 3rem; margin-bottom: 8px; }
+    h1 { font-size: 2rem; font-weight: 800; background: linear-gradient(135deg, #f5c518, #ff9f00); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 8px; }
+    p.tagline { color: #aaa; font-size: 1.1rem; margin-bottom: 40px; text-align: center; }
+    .features { display: flex; flex-direction: column; gap: 12px; margin-bottom: 40px; max-width: 360px; width: 100%; }
+    .feature { background: #1a1a2e; border: 1px solid #333; border-radius: 12px; padding: 14px 18px; display: flex; align-items: center; gap: 12px; font-size: 0.95rem; }
+    .feature .icon { font-size: 1.5rem; }
+    .download-btn {
+      display: inline-flex; align-items: center; gap: 10px;
+      background: linear-gradient(135deg, #f5c518, #ff9f00);
+      color: #0a0a0f; font-weight: 800; font-size: 1.1rem;
+      padding: 16px 36px; border-radius: 50px; text-decoration: none;
+      transition: transform 0.15s, box-shadow 0.15s;
+      box-shadow: 0 0 24px rgba(245,197,24,0.4);
+      margin-bottom: 16px;
+    }
+    .download-btn:hover { transform: scale(1.04); box-shadow: 0 0 36px rgba(245,197,24,0.6); }
+    .referral-note { color: #888; font-size: 0.85rem; text-align: center; }
+    .referral-note a { color: #f5c518; }
+    footer { margin-top: 48px; color: #555; font-size: 0.8rem; text-align: center; }
+  </style>
+</head>
+<body>
+  <div class="logo">🪙</div>
+  <h1>Bharat Cash Gold</h1>
+  <p class="tagline">Watch Ads. Tap. Earn Real Money.<br>Withdraw to your UPI instantly.</p>
+
+  <div class="features">
+    <div class="feature"><span class="icon">📺</span> Watch ads &amp; earn 0.2 coins each</div>
+    <div class="feature"><span class="icon">👆</span> Tap to earn — every 10 taps = an ad + coins</div>
+    <div class="feature"><span class="icon">🔥</span> 7-Day Streak Bonus — 500 extra coins</div>
+    <div class="feature"><span class="icon">💸</span> Withdraw to UPI when you hit ₹5</div>
+    <div class="feature"><span class="icon">👥</span> Refer friends — earn bonus coins</div>
+  </div>
+
+  <a class="download-btn" href="/Bharat-Cash-Gold.apk" id="apkLink">
+    ⬇ Download APK (Android)
+  </a>
+  <p class="referral-note">
+    Have a referral code? Your link: <a href="https://bharatcashgold.app?ref=YOURCODE">bharatcashgold.app?ref=YOURCODE</a>
+  </p>
+
+  <footer>
+    © 2025 Bharat Cash Gold &nbsp;·&nbsp;
+    <a href="/privacy" style="color:#555">Privacy Policy</a>
+  </footer>
+
+  <script>
+    // Parse referral deep-link from URL params
+    const params = new URLSearchParams(window.location.search);
+    const ref = params.get('ref');
+    if (ref) {
+      const btn = document.getElementById('apkLink');
+      if (btn) btn.href = `/Bharat-Cash-Gold.apk?ref=${encodeURIComponent(ref)}`;
+    }
+  </script>
+</body>
+</html>

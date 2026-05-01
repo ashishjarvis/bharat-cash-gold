@@ -1,0 +1,200 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&family=Orbitron:wght@500;700;900&display=swap');
+
+@layer base {
+  :root {
+    --background: 0 0% 4%;
+    --foreground: 45 100% 50%;
+
+    --card: 0 0% 8%;
+    --card-foreground: 45 100% 50%;
+
+    --popover: 0 0% 8%;
+    --popover-foreground: 45 100% 50%;
+
+    --primary: 45 100% 50%;
+    --primary-foreground: 0 0% 4%;
+
+    --secondary: 180 100% 50%;
+    --secondary-foreground: 0 0% 4%;
+
+    --muted: 0 0% 15%;
+    --muted-foreground: 0 0% 70%;
+
+    --accent: 120 100% 50%;
+    --accent-foreground: 0 0% 4%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 45 50% 20%;
+    --input: 0 0% 15%;
+    --ring: 45 100% 50%;
+
+    --radius: 0.75rem;
+
+    /* Custom tokens */
+    --gold: 45 100% 50%;
+    --gold-light: 45 100% 65%;
+    --gold-dark: 45 100% 35%;
+    --neon-cyan: 180 100% 50%;
+    --neon-green: 120 100% 50%;
+    --midnight: 0 0% 4%;
+    --midnight-light: 0 0% 10%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 4%;
+    
+    /* Gradients */
+    --gradient-gold: linear-gradient(135deg, hsl(45, 100%, 50%), hsl(35, 100%, 45%));
+    --gradient-card: linear-gradient(145deg, hsl(0, 0%, 10%), hsl(0, 0%, 6%));
+    --gradient-glow: radial-gradient(ellipse at center, hsl(45, 100%, 50%, 0.15), transparent 70%);
+    
+    /* Shadows */
+    --shadow-gold: 0 0 30px hsl(45, 100%, 50%, 0.3);
+    --shadow-neon: 0 0 20px hsl(180, 100%, 50%, 0.4);
+  }
+
+  .dark {
+    --background: 0 0% 4%;
+    --foreground: 45 100% 50%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-poppins;
+    background: linear-gradient(180deg, hsl(0, 0%, 4%) 0%, hsl(0, 0%, 8%) 100%);
+    min-height: 100vh;
+  }
+}
+
+@layer components {
+  .gold-text {
+    @apply text-primary;
+    text-shadow: 0 0 20px hsl(var(--gold) / 0.5);
+  }
+
+  .gold-gradient-text {
+    background: linear-gradient(135deg, hsl(45, 100%, 60%), hsl(45, 100%, 45%), hsl(35, 100%, 50%));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .glass-card {
+    @apply bg-card/90 backdrop-blur-xl border border-primary/20 rounded-2xl;
+    box-shadow: 
+      0 8px 32px hsl(0, 0%, 0%, 0.5),
+      inset 0 1px 0 hsl(45, 100%, 50%, 0.1);
+  }
+
+  .gold-glow {
+    box-shadow: 0 0 30px hsl(45, 100%, 50%, 0.5), 0 0 60px hsl(45, 100%, 50%, 0.3);
+  }
+
+  .btn-gold-glow {
+    @apply bg-gradient-to-r from-primary to-gold-dark text-primary-foreground font-bold;
+    box-shadow: 0 0 25px hsl(45, 100%, 50%, 0.4), 0 0 50px hsl(45, 100%, 50%, 0.2);
+    transition: all 0.3s ease;
+  }
+
+  .btn-gold-glow:hover:not(:disabled) {
+    box-shadow: 0 0 35px hsl(45, 100%, 50%, 0.6), 0 0 70px hsl(45, 100%, 50%, 0.3);
+    transform: translateY(-2px);
+  }
+
+  .btn-gold-glow:active:not(:disabled) {
+    transform: translateY(0);
+  }
+
+  .neon-border {
+    @apply border-2;
+    border-image: linear-gradient(135deg, hsl(45, 100%, 50%), hsl(180, 100%, 50%)) 1;
+  }
+
+  .coin-shine {
+    background: linear-gradient(
+      135deg,
+      hsl(45, 100%, 60%) 0%,
+      hsl(45, 100%, 50%) 45%,
+      hsl(35, 100%, 40%) 50%,
+      hsl(45, 100%, 50%) 55%,
+      hsl(45, 100%, 60%) 100%
+    );
+    animation: shine 3s ease-in-out infinite;
+  }
+
+  @keyframes shine {
+    0%, 100% { background-position: -100% 0; }
+    50% { background-position: 200% 0; }
+  }
+
+  @keyframes pulse-gold {
+    0%, 100% { 
+      box-shadow: 0 0 20px hsl(45, 100%, 50%, 0.4);
+      transform: scale(1);
+    }
+    50% { 
+      box-shadow: 0 0 40px hsl(45, 100%, 50%, 0.6);
+      transform: scale(1.02);
+    }
+  }
+
+  @keyframes float {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-10px); }
+  }
+
+  @keyframes spin-wheel {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+  }
+
+  @keyframes coin-drop {
+    0% { transform: translateY(-20px) scale(0); opacity: 0; }
+    50% { transform: translateY(0) scale(1.2); opacity: 1; }
+    100% { transform: translateY(0) scale(1); opacity: 1; }
+  }
+
+  .animate-pulse-gold {
+    animation: pulse-gold 2s ease-in-out infinite;
+  }
+
+  .animate-float {
+    animation: float 3s ease-in-out infinite;
+  }
+
+  .animate-spin-slow {
+    animation: spin-wheel 20s linear infinite;
+  }
+
+  .animate-coin-drop {
+    animation: coin-drop 0.5s ease-out forwards;
+  }
+
+  @keyframes slide-in {
+    0% { transform: translateX(100%); opacity: 0; }
+    100% { transform: translateX(0); opacity: 1; }
+  }
+
+  .animate-slide-in {
+    animation: slide-in 0.5s ease-out forwards;
+  }
+}
+
+@layer utilities {
+  .font-poppins {
+    font-family: 'Poppins', sans-serif;
+  }
+
+  .font-orbitron {
+    font-family: 'Orbitron', sans-serif;
+  }
+}
