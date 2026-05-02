@@ -15,7 +15,7 @@ import { LivePaymentTicker } from '@/components/LivePaymentTicker';
 import LoadingScreen from '@/components/LoadingScreen';
 import { useCoinsDB } from '@/hooks/useCoinsDB';
 import { useSimpleAuth } from '@/contexts/SimpleAuthContext';
-import { initializeUnityAds } from '@/lib/unityAds';
+import { initializeUnityAds, unityAdsDiagnostics } from '@/lib/unityAds';
 
 type Tab = 'home' | 'leaderboard' | 'wallet' | 'tasks';
 
@@ -61,8 +61,11 @@ const Index = () => {
   }, [user, authLoading, navigate]);
 
   useEffect(() => {
-    // Initialize Unity Ads SDK once at app launch and preload placements
-    initializeUnityAds();
+    // SDK already started in main.tsx — this ensures it's ready
+    // and logs diagnostics so Ashish bhai can see the full state in adb logcat
+    initializeUnityAds().then(() => {
+      unityAdsDiagnostics();
+    });
   }, []);
 
   const handleCheckAdLimits = useCallback(
