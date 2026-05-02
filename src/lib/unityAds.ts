@@ -1,6 +1,7 @@
 // ============================================
 // REAL UNITY ADS — Capacitor Plugin Bridge
-// Game ID: 6032941 | Platform: Android
+// Project ID: db811c8a-0baf-4a79-bed2-441b81170297
+// Game ID: 6104683 | Platform: Android
 // testMode: false (LIVE ADS)
 // ============================================
 // Reward is granted ONLY inside onUnityAdsShowComplete
@@ -9,7 +10,8 @@
 
 import { registerPlugin } from '@capacitor/core';
 
-export const UNITY_GAME_ID = '6032941';
+export const UNITY_PROJECT_ID = 'db811c8a-0baf-4a79-bed2-441b81170297';
+export const UNITY_GAME_ID = '6104683';
 export const UNITY_TEST_MODE = false;
 
 export const PLACEMENTS = {

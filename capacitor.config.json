@@ -7,6 +7,11 @@
       "launchShowDuration": 2000,
       "backgroundColor": "#0a0a0f",
       "showSpinner": false
+    },
+    "UnityAds": {
+      "gameId": "6104683",
+      "projectId": "db811c8a-0baf-4a79-bed2-441b81170297",
+      "testMode": false
     }
   }
 }

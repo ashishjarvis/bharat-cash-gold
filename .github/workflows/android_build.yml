@@ -47,16 +47,19 @@ jobs:
         run: chmod +x android/gradlew
 
       - name: Inject Unity Ads SDK into Gradle
+        env:
+          UNITY_GAME_ID: "6104683"
+          UNITY_PROJECT_ID: "db811c8a-0baf-4a79-bed2-441b81170297"
         run: |
           GRADLE="android/build.gradle"
           APP_GRADLE="android/app/build.gradle"
           if [ -f "$GRADLE" ] && ! grep -q "unity-ads" "$GRADLE"; then
             sed -i 's|mavenCentral()|mavenCentral()\n        maven { url "https://storage.googleapis.com/unity-ads-android/sdk/" }|g' "$GRADLE"
-            echo "Added Unity Ads Maven repo"
+            echo "Added Unity Ads Maven repo (Game ID: $UNITY_GAME_ID)"
           fi
           if [ -f "$APP_GRADLE" ] && ! grep -q "unity-ads" "$APP_GRADLE"; then
             sed -i '/^dependencies {/a\    implementation "com.unity3d.ads:unity-ads:4.12.4"' "$APP_GRADLE"
-            echo "Added Unity Ads dependency"
+            echo "Added Unity Ads 4.12.4 dependency (Project ID: $UNITY_PROJECT_ID)"
           fi
 
       - name: Cache Gradle
