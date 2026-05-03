@@ -16,6 +16,7 @@ import LoadingScreen from '@/components/LoadingScreen';
 import { useCoinsDB } from '@/hooks/useCoinsDB';
 import { useSimpleAuth } from '@/contexts/SimpleAuthContext';
 import { initializeUnityAds, unityAdsDiagnostics } from '@/lib/unityAds';
+import { UnityTestBanner } from '@/components/UnityAdsStatus';
 
 type Tab = 'home' | 'leaderboard' | 'wallet' | 'tasks';
 
@@ -82,6 +83,7 @@ const Index = () => {
         return (
           <div className="space-y-4">
             <CoinDisplay coins={totalCoins} rupees={rupeesValue} />
+            <UnityTestBanner />
             <LivePaymentTicker />
 
             <MegaTask

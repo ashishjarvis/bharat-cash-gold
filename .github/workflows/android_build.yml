@@ -43,6 +43,34 @@ jobs:
           npx cap add android 2>/dev/null || echo "Android platform already added"
           npx cap sync android
 
+      - name: Patch Unity Ads Java — Embed Error Codes in Failure Callbacks
+        run: |
+          echo "=== Patching Unityads.java to include error enum name in callbacks ==="
+          # After 'cap sync', the plugin Java is copied into android/
+          # Without this patch, the JS layer only gets the string message, not the enum code.
+          # With this patch, errors arrive as: "Failed to load rewarded video [NO_FILL]: ..."
+          JAVA_FILE=$(find android -path "*/capacitor-unity-ads*/Unityads.java" 2>/dev/null | head -1)
+          if [ -z "$JAVA_FILE" ]; then
+            # Try alternate path under .build or capacitor-plugins
+            JAVA_FILE=$(find android -name "Unityads.java" 2>/dev/null | head -1)
+          fi
+          if [ -f "$JAVA_FILE" ]; then
+            echo "Found plugin Java at: $JAVA_FILE"
+
+            # Patch rewarded load failure
+            sed -i 's|callback\.onError("Failed to load rewarded video: " + message)|callback.onError("Failed to load rewarded video [" + error.name() + "]: " + message)|g' "$JAVA_FILE"
+
+            # Patch interstitial load failure
+            sed -i 's|callback\.onError("Failed to load interstitial: " + message)|callback.onError("Failed to load interstitial [" + error.name() + "]: " + message)|g' "$JAVA_FILE"
+
+            echo "✅ Patched Unityads.java — errors will now include NO_FILL/NETWORK_ERROR/etc."
+            echo "Patched lines:"
+            grep "error.name()" "$JAVA_FILE" || echo "(already patched or lines not found — check manually)"
+          else
+            echo "⚠️  Unityads.java not found — patch skipped (will use message-only errors)"
+            find android -name "*.java" 2>/dev/null | grep -i unity | head -10 || echo "No Unity Java files found"
+          fi
+
       - name: Patch AndroidManifest — Add Required Permissions
         run: |
           MANIFEST="android/app/src/main/AndroidManifest.xml"
