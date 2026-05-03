@@ -1,6 +1,7 @@
 import { Coins, User } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useSimpleAuth } from '@/contexts/SimpleAuthContext';
+import { UnityAdsStatus } from '@/components/UnityAdsStatus';
 import appLogo from '@/assets/logo.png';
 
 interface HeaderProps {
@@ -25,15 +26,17 @@ export const Header = ({ coins }: HeaderProps) => {
           </div>
         </div>
 
-        {/* Quick stats */}
-        <div className="flex items-center gap-3">
+        {/* Quick stats + Unity status */}
+        <div className="flex items-center gap-2">
+          <UnityAdsStatus />
+
           <div className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-primary/10 border border-primary/30">
             <Coins className="w-4 h-4 text-primary" />
             <span className="font-orbitron font-bold text-sm text-primary">
               {coins.toFixed(1)}
             </span>
           </div>
-          
+
           {user && (
             <button
               onClick={() => navigate('/profile')}

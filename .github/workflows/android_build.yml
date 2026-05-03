@@ -43,23 +43,68 @@ jobs:
           npx cap add android 2>/dev/null || echo "Android platform already added"
           npx cap sync android
 
+      - name: Patch AndroidManifest — Add Required Permissions
+        run: |
+          MANIFEST="android/app/src/main/AndroidManifest.xml"
+          if [ -f "$MANIFEST" ]; then
+            echo "Current permissions in manifest:"
+            grep "uses-permission" "$MANIFEST" || echo "(none found)"
+
+            # Add ACCESS_NETWORK_STATE if missing (required by Unity Ads SDK)
+            if ! grep -q "ACCESS_NETWORK_STATE" "$MANIFEST"; then
+              sed -i 's|<uses-permission android:name="android.permission.INTERNET" />|<uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />|g' "$MANIFEST"
+              echo "✅ Added ACCESS_NETWORK_STATE permission"
+            else
+              echo "✅ ACCESS_NETWORK_STATE already present"
+            fi
+
+            # Add INTERNET if somehow missing
+            if ! grep -q "android.permission.INTERNET" "$MANIFEST"; then
+              sed -i 's|<application|<uses-permission android:name="android.permission.INTERNET" />\n    <application|g' "$MANIFEST"
+              echo "✅ Added INTERNET permission"
+            else
+              echo "✅ INTERNET already present"
+            fi
+
+            echo "Final permissions:"
+            grep "uses-permission" "$MANIFEST"
+          else
+            echo "❌ AndroidManifest.xml not found at $MANIFEST"
+          fi
+
       - name: Make Gradlew Executable
         run: chmod +x android/gradlew
 
-      - name: Inject Unity Ads SDK into Gradle
+      - name: Verify Unity Ads Plugin in Gradle
         env:
           UNITY_GAME_ID: "6104683"
           UNITY_PROJECT_ID: "db811c8a-0baf-4a79-bed2-441b81170297"
         run: |
-          GRADLE="android/build.gradle"
-          APP_GRADLE="android/app/build.gradle"
-          if [ -f "$GRADLE" ] && ! grep -q "unity-ads" "$GRADLE"; then
-            sed -i 's|mavenCentral()|mavenCentral()\n        maven { url "https://storage.googleapis.com/unity-ads-android/sdk/" }|g' "$GRADLE"
-            echo "Added Unity Ads Maven repo (Game ID: $UNITY_GAME_ID)"
+          echo "=== Unity Ads Plugin Verification ==="
+          echo "Game ID    : $UNITY_GAME_ID"
+          echo "Project ID : $UNITY_PROJECT_ID"
+          echo ""
+
+          # The capacitor-unity-ads plugin already includes unity-ads:4.9.2 in its own build.gradle.
+          # We must NOT add a duplicate implementation here — that causes duplicate class errors.
+          # Just verify the plugin is present in the generated Capacitor settings.
+          if [ -f "android/capacitor.settings.gradle" ]; then
+            echo "Capacitor plugin settings:"
+            cat android/capacitor.settings.gradle
           fi
-          if [ -f "$APP_GRADLE" ] && ! grep -q "unity-ads" "$APP_GRADLE"; then
-            sed -i '/^dependencies {/a\    implementation "com.unity3d.ads:unity-ads:4.12.4"' "$APP_GRADLE"
-            echo "Added Unity Ads 4.12.4 dependency (Project ID: $UNITY_PROJECT_ID)"
+          if [ -f "android/app/src/main/assets/capacitor.plugins.json" ]; then
+            echo ""
+            echo "Registered Capacitor plugins:"
+            cat android/app/src/main/assets/capacitor.plugins.json
+          fi
+
+          # Only add Maven repo if not already present (for Unity Ads resolution)
+          GRADLE="android/build.gradle"
+          if [ -f "$GRADLE" ] && ! grep -q "storage.googleapis.com/unity-ads" "$GRADLE"; then
+            sed -i 's|mavenCentral()|mavenCentral()\n        maven { url "https://storage.googleapis.com/unity-ads-android/sdk/" }|g' "$GRADLE"
+            echo "✅ Added Unity Ads Maven repo to root build.gradle"
+          else
+            echo "✅ Unity Ads Maven repo already present or not needed"
           fi
 
       - name: Cache Gradle
