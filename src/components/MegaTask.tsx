@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Play, Trophy, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
+import { Play, Trophy, CheckCircle, Loader2 } from 'lucide-react';
 import { Progress } from '@/components/ui/progress';
 import { CountdownButton } from './CountdownButton';
 import { AdLoadingOverlay } from './AdLoadingOverlay';
@@ -13,6 +13,9 @@ interface MegaTaskProps {
   onReset: () => void;
   userId: string;
   onCheckAdLimits: () => Promise<{ allowed: boolean; reason?: string }>;
+  // Unified callback: called with reward amount after SUCCESSFUL ad completion
+  // Handles watchAd + addCoins + recordAdComplete + CPX trigger from parent
+  onAdCompleted?: (reward: number) => Promise<void> | void;
 }
 
 export const MegaTask = ({
@@ -22,12 +25,13 @@ export const MegaTask = ({
   onReset,
   userId,
   onCheckAdLimits,
+  onAdCompleted,
 }: MegaTaskProps) => {
   const [isLoadingAd, setIsLoadingAd] = useState(false);
-  const [showReward, setShowReward] = useState(false);
+  const [showReward, setShowReward]   = useState(false);
 
   const isComplete = adsWatched >= 10;
-  const progress = (adsWatched / 10) * 100;
+  const progress   = (adsWatched / 10) * 100;
 
   const handleWatchAd = async () => {
     if (isComplete || isLoadingAd) return;
@@ -37,9 +41,14 @@ export const MegaTask = ({
       const result = await showRewardedAd(userId, onCheckAdLimits);
 
       if (result.success) {
-        // Reward ONLY granted via Unity Ads onUnityAdsShowComplete(state == COMPLETED)
-        onAdWatched();
-        onRewardClaimed(result.reward);
+        // If parent supplies unified callback, use it (handles streak/referral/CPX)
+        if (onAdCompleted) {
+          await onAdCompleted(result.reward);
+        } else {
+          // Legacy path — kept for backward compat
+          onAdWatched();
+          onRewardClaimed(result.reward);
+        }
 
         if (adsWatched + 1 >= 10) {
           setShowReward(true);
@@ -51,10 +60,9 @@ export const MegaTask = ({
           toast.success(`+${result.reward} coins earned!`);
         }
       } else {
-        // Skipped, failed, closed early, or limit reached
         switch (result.reason) {
           case 'not_completed':
-            toast.error('Ad not completed, no reward granted.');
+            toast.error('Ad not completed — no reward granted.');
             break;
           case 'cooldown':
             toast.warning('Please wait 30 seconds between ads.');
@@ -64,7 +72,7 @@ export const MegaTask = ({
             break;
           case 'not_available':
           default:
-            toast.error('Ad not available at the moment, please try again later.');
+            toast.error('Ad not available right now — please try again later.');
         }
       }
     } finally {
@@ -107,20 +115,11 @@ export const MegaTask = ({
           className="w-full h-14 text-lg font-bold btn-gold-glow"
         >
           {isLoadingAd ? (
-            <>
-              <Loader2 className="w-5 h-5 mr-2 animate-spin" />
-              Loading Ad...
-            </>
+            <><Loader2 className="w-5 h-5 mr-2 animate-spin" />Loading Ad...</>
           ) : isComplete ? (
-            <>
-              <CheckCircle className="w-5 h-5 mr-2" />
-              Completed!
-            </>
+            <><CheckCircle className="w-5 h-5 mr-2" />Completed!</>
           ) : (
-            <>
-              <Play className="w-5 h-5 mr-2" />
-              Watch Ad ({adsWatched}/10)
-            </>
+            <><Play className="w-5 h-5 mr-2" />Watch Ad ({adsWatched}/10)</>
           )}
         </CountdownButton>
 
