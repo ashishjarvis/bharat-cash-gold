@@ -12,30 +12,23 @@ import { useNetworkStatus } from "@/hooks/useNetworkStatus";
 import { useAntiVPN } from "@/hooks/useAntiVPN";
 import Index from "./pages/Index";
 import Auth from "./pages/Auth";
+import Admin from "./pages/Admin";
 import Profile from "./pages/Profile";
 import PrivacyPolicy from "./pages/PrivacyPolicy";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient({
   defaultOptions: {
-    queries: {
-      retry: 2,
-      staleTime: 5 * 60 * 1000,
-    },
+    queries: { retry: 2, staleTime: 5 * 60 * 1000 },
   },
 });
 
 const AppContent = () => {
   const { isOnline, retry } = useNetworkStatus();
-  const { isVPN, checked } = useAntiVPN();
+  const { isVPN, checked }  = useAntiVPN();
 
-  if (!isOnline) {
-    return <OfflineScreen onRetry={retry} />;
-  }
-
-  if (checked && isVPN) {
-    return <VPNBlockScreen />;
-  }
+  if (!isOnline) return <OfflineScreen onRetry={retry} />;
+  if (checked && isVPN) return <VPNBlockScreen />;
 
   return (
     <SimpleAuthProvider>
@@ -44,11 +37,13 @@ const AppContent = () => {
         <Sonner />
         <BrowserRouter basename="/">
           <Routes>
-            <Route path="/" element={<Index />} />
-            <Route path="/auth" element={<Auth />} />
-            <Route path="/profile" element={<Profile />} />
-            <Route path="/privacy-policy" element={<PrivacyPolicy />} />
-            <Route path="*" element={<NotFound />} />
+            <Route path="/"                    element={<Index />} />
+            <Route path="/auth"                element={<Auth />} />
+            <Route path="/profile"             element={<Profile />} />
+            <Route path="/privacy-policy"      element={<PrivacyPolicy />} />
+            {/* Admin panel — URL kept obscure; server also verifies is_admin flag */}
+            <Route path="/ashish-admin-786"    element={<Admin />} />
+            <Route path="*"                    element={<NotFound />} />
           </Routes>
         </BrowserRouter>
       </TooltipProvider>
