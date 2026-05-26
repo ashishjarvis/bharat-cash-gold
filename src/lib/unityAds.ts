@@ -1,14 +1,18 @@
 // ============================================================
-// REAL UNITY ADS — Capacitor Plugin Bridge (v6 — LOOP FIX)
-// Android Game ID : 6104683   testMode : true
+// REAL UNITY ADS — Capacitor Plugin Bridge (v7 — ADMARKUP FIX)
+// Android Game ID : 6104683   testMode : TRUE (hardcoded literal)
 // ============================================================
+// v7 changes (adMarkup fix):
+//   - initialize() uses hardcoded literal true — NOT a variable
+//     that could silently resolve to false in any build
+//   - loadRewardedVideo() uses hardcoded "Rewarded_Android" string
+//   - "adMarkup is missing" caught separately: clears error state,
+//     does NOT increment permanent retry counter, auto-retries in 5s
 // v6 changes (LOOP FIX):
 //   - Mutex (_loadInProgress) prevents concurrent load calls
-//   - Silent pre-load (post-show) NEVER shows "retrying" status
+//   - Silent pre-load (post-show) NEVER shows 'retrying' status
 //   - Exponential backoff: 30 s → 60 s → 120 s (NOT 5 s)
-//   - After MAX_AUTO_RETRIES: permanent 'load_failed', NO more
-//     auto-retries — user sees graceful fallback and can Retry
-//   - Once 'rewarded_loaded' is set it STAYS until ad is shown
+//   - After MAX_AUTO_RETRIES: permanent 'load_failed', graceful UI
 //   - Background retry timer always cleared on successful load
 //   - initializeUnityAds() locked with sdkReady + initPromise
 // ============================================================
@@ -117,7 +121,8 @@ export async function initializeUnityAds(): Promise<void> {
 
   initPromise = (async () => {
     try {
-      await UnityAdsPlugin.initialize({ gameId: UNITY_GAME_ID, testMode: UNITY_TEST_MODE });
+      // testMode is a HARDCODED LITERAL true — never a variable that could flip
+      await UnityAdsPlugin.initialize({ gameId: '6104683', testMode: true });
 
       try {
         const v = await UnityAdsPlugin.getVersion();
@@ -163,8 +168,9 @@ export async function loadRewardedVideoAd(silent = false): Promise<void> {
   console.log(`[UnityAds] 📥 Loading rewarded${silent ? ' (silent pre-load)' : ''} — Game ID:`, UNITY_GAME_ID);
 
   try {
+    // Placement ID is a HARDCODED STRING — explicit test placement
     await withTimeout(
-      UnityAdsPlugin.loadRewardedVideo({ placementId: PLACEMENTS.REWARDED }),
+      UnityAdsPlugin.loadRewardedVideo({ placementId: 'Rewarded_Android' }),
       LOAD_TIMEOUT_MS,
       'loadRewardedVideo'
     );
@@ -181,8 +187,29 @@ export async function loadRewardedVideoAd(silent = false): Promise<void> {
     const msg  = err instanceof Error ? err.message : String(err);
     const code = parseErrorCode(msg);
     _lastErrorCode = code;
-    _retryCount++;
 
+    // ── Special case: "adMarkup is missing" ───────────────────
+    // This error means the SDK loaded but Unity's CDN hasn't delivered
+    // ad creative yet (common on first init or after testMode toggle).
+    // Fix: clear error state from UI, do NOT count as a permanent failure,
+    //      always auto-retry in exactly 5 s using the hardcoded test placement.
+    if (msg.toLowerCase().includes('admarkup is missing')) {
+      console.warn('[UnityAds] ⚠️  adMarkup is missing — test creative not yet delivered.');
+      console.warn('[UnityAds]    testMode=true is hardcoded. Clearing error state, retrying in 5s...');
+      // Keep UI stable — don't show a red error for this transient condition
+      setStatus('ready');
+      clearRetryTimer();
+      _retryTimer = setTimeout(() => {
+        _retryTimer = null;
+        if (sdkReady && !rewardedLoaded && !_loadInProgress) {
+          console.log('[UnityAds] 🔄 adMarkup retry — loading Rewarded_Android with testMode=true...');
+          loadRewardedVideoAd(false);
+        }
+      }, 5_000);
+      return;   // skip permanent-retry-counter logic below
+    }
+
+    _retryCount++;
     console.error(`[UnityAds] ❌ Load FAILED — Code: ${code} | attempt ${_retryCount}/${MAX_AUTO_RETRIES}`);
 
     if (_retryCount >= MAX_AUTO_RETRIES) {
