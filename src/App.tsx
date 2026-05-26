@@ -12,6 +12,7 @@ import { useNetworkStatus } from "@/hooks/useNetworkStatus";
 import { useAntiVPN } from "@/hooks/useAntiVPN";
 import Index from "./pages/Index";
 import Auth from "./pages/Auth";
+import AuthCallback from "./pages/AuthCallback";
 import Admin from "./pages/Admin";
 import Profile from "./pages/Profile";
 import PrivacyPolicy from "./pages/PrivacyPolicy";
@@ -37,13 +38,14 @@ const AppContent = () => {
         <Sonner />
         <BrowserRouter basename="/">
           <Routes>
-            <Route path="/"                    element={<Index />} />
-            <Route path="/auth"                element={<Auth />} />
-            <Route path="/profile"             element={<Profile />} />
-            <Route path="/privacy-policy"      element={<PrivacyPolicy />} />
-            {/* Admin panel — URL kept obscure; server also verifies is_admin flag */}
-            <Route path="/ashish-admin-786"    element={<Admin />} />
-            <Route path="*"                    element={<NotFound />} />
+            <Route path="/"                 element={<Index />} />
+            <Route path="/auth"             element={<Auth />} />
+            <Route path="/auth/callback"    element={<AuthCallback />} />
+            <Route path="/profile"          element={<Profile />} />
+            <Route path="/privacy-policy"   element={<PrivacyPolicy />} />
+            {/* Admin panel — server also verifies is_admin flag */}
+            <Route path="/ashish-admin-786" element={<Admin />} />
+            <Route path="*"                 element={<NotFound />} />
           </Routes>
         </BrowserRouter>
       </TooltipProvider>
