@@ -1,316 +1,310 @@
 // ============================================================
-// REAL UNITY ADS — Capacitor Plugin Bridge (v5 — FLICKER FIX)
-// Project ID : db811c8a-0baf-4a79-bed2-441b81170297
-// Android Game ID : 6104683
-// testMode  : TRUE  ← confirms SDK connectivity
+// REAL UNITY ADS — Capacitor Plugin Bridge (v6 — LOOP FIX)
+// Android Game ID : 6104683   testMode : true
 // ============================================================
-// v5 bug fixes:
-//  - REMOVED setTestMode() call post-init — it caused "Connection OK"
-//    to flash then reset to "Connecting..." because the native side
-//    treats setTestMode() as a config reset after initialization.
-//  - initializeUnityAds() is SINGLE-INSTANCE protected via sdkReady
-//    guard + initPromise dedup — will NEVER run twice.
-//  - parseErrorCode() extracts NO_FILL/NETWORK_ERROR/INTERNAL_ERROR/
-//    INVALID_ARGUMENT/TIMEOUT from the Java error message string.
-//    CI workflow patches Unityads.java so errors include [ERROR_CODE].
+// v6 changes (LOOP FIX):
+//   - Mutex (_loadInProgress) prevents concurrent load calls
+//   - Silent pre-load (post-show) NEVER shows "retrying" status
+//   - Exponential backoff: 30 s → 60 s → 120 s (NOT 5 s)
+//   - After MAX_AUTO_RETRIES: permanent 'load_failed', NO more
+//     auto-retries — user sees graceful fallback and can Retry
+//   - Once 'rewarded_loaded' is set it STAYS until ad is shown
+//   - Background retry timer always cleared on successful load
+//   - initializeUnityAds() locked with sdkReady + initPromise
 // ============================================================
 
 import { UnityAds as UnityAdsPlugin } from 'capacitor-unity-ads';
 
-export const UNITY_PROJECT_ID  = 'db811c8a-0baf-4a79-bed2-441b81170297';
-export const UNITY_GAME_ID     = '6104683';
-// testMode = true → Unity serves test ads regardless of fill
-export const UNITY_TEST_MODE   = true;
+// ── Public constants ──────────────────────────────────────────
+export const UNITY_PROJECT_ID = 'db811c8a-0baf-4a79-bed2-441b81170297';
+export const UNITY_GAME_ID    = '6104683';
+export const UNITY_TEST_MODE  = true;
 
 export const PLACEMENTS = {
   REWARDED:     'Rewarded_Android',
   INTERSTITIAL: 'Interstitial_Android',
 } as const;
 
-// ─── Retry / timeout config ──────────────────────────────────
-const LOAD_TIMEOUT_MS  = 30_000;
-const RETRY_DELAY_MS   = 5_000;
-const MAX_LOAD_RETRIES = 3;
-const COOLDOWN_MS      = 30_000;
+// ── Config ────────────────────────────────────────────────────
+const LOAD_TIMEOUT_MS   = 30_000;
+const COOLDOWN_MS       = 30_000;
+const MAX_AUTO_RETRIES  = 3;
+// Exponential backoff delays between auto-retries (ms)
+const BACKOFF_MS: number[] = [30_000, 60_000, 120_000];
 
-// ─── Internal state ───────────────────────────────────────────
-let sdkReady           = false;
+// ── Module-level state (singleton) ────────────────────────────
+let sdkReady          = false;
 let initPromise: Promise<void> | null = null;
-let rewardedLoaded     = false;
-let interstitialLoaded = false;
-let lastAdCompletedAt  = 0;
-let _retryTimer: ReturnType<typeof setTimeout> | null = null;
-let _lastErrorCode     = 'NONE';
-let _sdkVersion        = 'unknown';
 
-// ─── AD RESULT ────────────────────────────────────────────────
+let rewardedLoaded    = false;
+let interstitialLoaded = false;
+let lastAdCompletedAt = 0;
+
+let _loadInProgress   = false;   // mutex — one load at a time
+let _retryCount       = 0;       // cumulative load failures
+let _retryTimer: ReturnType<typeof setTimeout> | null = null;
+let _lastErrorCode    = 'NONE';
+let _sdkVersion       = 'unknown';
+
+// ── Types ─────────────────────────────────────────────────────
 export type AdResult =
   | { success: true;  reward: number }
   | { success: false; reason: 'not_available' | 'not_completed' | 'cooldown' | 'daily_limit' };
 
-// ─── UI STATUS ────────────────────────────────────────────────
 export type UnityAdsStatusType =
   | 'initializing'
   | 'ready'
-  | 'rewarded_loaded'
-  | 'retrying'
-  | 'load_failed'
-  | 'not_available';
+  | 'rewarded_loaded'   // ad ready — STABLE state, never auto-reset
+  | 'load_failed'       // graceful fallback
+  | 'not_available';    // SDK init failed
 
+// ── Status listeners ──────────────────────────────────────────
 let _uiStatus: UnityAdsStatusType = 'initializing';
-const _statusListeners: Array<(s: UnityAdsStatusType) => void> = [];
+const _listeners: Array<(s: UnityAdsStatusType) => void> = [];
 
 function setStatus(s: UnityAdsStatusType): void {
+  if (_uiStatus === s) return;   // skip no-op changes
   _uiStatus = s;
-  _statusListeners.forEach(fn => fn(s));
+  _listeners.forEach(fn => fn(s));
 }
 
-export function getUnityAdsStatus(): UnityAdsStatusType  { return _uiStatus; }
-export function getLastErrorCode():  string              { return _lastErrorCode; }
-export function getSdkVersion():     string              { return _sdkVersion; }
+export function getUnityAdsStatus(): UnityAdsStatusType { return _uiStatus; }
+export function getLastErrorCode():  string             { return _lastErrorCode; }
+export function getSdkVersion():     string             { return _sdkVersion; }
 
 export function onUnityAdsStatusChange(fn: (s: UnityAdsStatusType) => void): () => void {
-  _statusListeners.push(fn);
+  _listeners.push(fn);
   return () => {
-    const idx = _statusListeners.indexOf(fn);
-    if (idx !== -1) _statusListeners.splice(idx, 1);
+    const i = _listeners.indexOf(fn);
+    if (i !== -1) _listeners.splice(i, 1);
   };
 }
 
-// ─── Parse Unity error enum from message string ──────────────
-// CI patches Unityads.java to embed "[NO_FILL]" etc.
-const UNITY_CODES = ['NO_FILL', 'NETWORK_ERROR', 'INTERNAL_ERROR', 'INVALID_ARGUMENT', 'TIMEOUT'] as const;
+// ── Parse Unity error enum from callback message ──────────────
+const UNITY_CODES = ['NO_FILL','NETWORK_ERROR','INTERNAL_ERROR','INVALID_ARGUMENT','TIMEOUT'] as const;
 
 function parseErrorCode(msg: string): string {
-  const bracket = msg.match(/\[([A-Z_]+)\]/);
-  if (bracket) return bracket[1];
-  for (const code of UNITY_CODES) {
-    if (msg.toUpperCase().includes(code)) return code;
+  const m = msg.match(/\[([A-Z_]+)\]/);
+  if (m) return m[1];
+  for (const c of UNITY_CODES) {
+    if (msg.toUpperCase().includes(c)) return c;
   }
   return msg.length > 60 ? msg.slice(0, 60) + '…' : msg;
 }
 
-// ─── Helpers ─────────────────────────────────────────────────
-function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-  const t = new Promise<never>((_, reject) =>
-    setTimeout(() => reject(new Error(`TIMEOUT — ${label} exceeded ${ms / 1000}s`)), ms)
+// ── Helpers ───────────────────────────────────────────────────
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  const t = new Promise<never>((_, rej) =>
+    setTimeout(() => rej(new Error(`TIMEOUT — ${label} exceeded ${ms / 1000}s`)), ms)
   );
-  return Promise.race([promise, t]);
+  return Promise.race([p, t]);
 }
-const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 
-// ─── INITIALIZE SDK ──────────────────────────────────────────
-// Runs ONCE. Protected by sdkReady + initPromise guards.
-// DO NOT call setTestMode() after this — it resets native SDK state.
+function clearRetryTimer() {
+  if (_retryTimer) { clearTimeout(_retryTimer); _retryTimer = null; }
+}
+
+// ── INITIALIZE SDK ────────────────────────────────────────────
+// Runs EXACTLY ONCE — guarded by sdkReady + initPromise.
+// NEVER call setTestMode() after — it resets native SDK state.
 export async function initializeUnityAds(): Promise<void> {
-  if (sdkReady) {
-    console.log('[UnityAds] ✅ Already initialized. Game ID:', UNITY_GAME_ID);
-    return;
-  }
-  if (initPromise) return initPromise;   // dedup concurrent calls
+  if (sdkReady) return;              // already done
+  if (initPromise) return initPromise;  // concurrent call — share same promise
 
   setStatus('initializing');
+  console.log('[UnityAds] ══════════════════════════════');
+  console.log('[UnityAds] 🚀 INIT — Game ID:', UNITY_GAME_ID, '| testMode:', UNITY_TEST_MODE);
 
   initPromise = (async () => {
     try {
-      console.log('[UnityAds] ═══════════════════════════════════');
-      console.log('[UnityAds] 🚀 INITIALIZING — Game ID:', UNITY_GAME_ID);
-      console.log('[UnityAds]    Project ID :', UNITY_PROJECT_ID);
-      console.log('[UnityAds]    Test Mode  :', UNITY_TEST_MODE, '← test ads ON');
-      console.log('[UnityAds]    Bundle     : com.ashish.bharatcash');
-      console.log('[UnityAds] ═══════════════════════════════════');
-
-      // testMode is passed HERE — no setTestMode() call after this
       await UnityAdsPlugin.initialize({ gameId: UNITY_GAME_ID, testMode: UNITY_TEST_MODE });
 
-      // Log SDK version (best-effort — some builds don't support it)
       try {
         const v = await UnityAdsPlugin.getVersion();
         _sdkVersion = v.version;
         console.log('[UnityAds] SDK version:', _sdkVersion);
-      } catch {
-        console.log('[UnityAds] getVersion() not supported on this build');
-      }
+      } catch { /* getVersion optional */ }
 
       sdkReady = true;
       setStatus('ready');
-      console.log('[UnityAds] ✅ SDK initialized — now loading ad placements...');
+      console.log('[UnityAds] ✅ SDK ready — loading placements...');
 
-      // Pre-load both placements
-      await Promise.allSettled([loadRewardedVideoAd(), loadInterstitialAd()]);
+      // Fire-and-forget pre-load; errors handled inside
+      loadRewardedVideoAd(false);
+      loadInterstitialAd();
 
     } catch (err: unknown) {
-      const msg  = err instanceof Error ? err.message : String(err);
-      const code = parseErrorCode(msg);
+      const code = parseErrorCode(err instanceof Error ? err.message : String(err));
       _lastErrorCode = code;
+      initPromise = null;  // allow one retry of init
       setStatus('not_available');
-      initPromise = null; // allow future retry
-
-      console.error('[UnityAds] ❌ INIT FAILED — Code:', code, '| Msg:', msg);
-      console.error('[UnityAds]    Check Game ID:', UNITY_GAME_ID);
-      console.error('[UnityAds]    Bundle: com.ashish.bharatcash');
-      console.error('[UnityAds]    Permissions: INTERNET + ACCESS_NETWORK_STATE');
+      console.error('[UnityAds] ❌ INIT FAILED — Code:', code);
+      console.error('[UnityAds]    Ads temporarily unavailable. User can still use the app.');
     }
   })();
 
   return initPromise;
 }
 
-// ─── LOAD REWARDED VIDEO (timeout + 3-attempt auto-retry) ────
-export async function loadRewardedVideoAd(): Promise<void> {
+// ── LOAD REWARDED VIDEO ───────────────────────────────────────
+// silent=true  → post-show pre-load; NEVER shows 'retrying' or changes stable status
+// silent=false → initial load or manual retry; updates status normally
+export async function loadRewardedVideoAd(silent = false): Promise<void> {
   if (!sdkReady) {
-    console.warn('[UnityAds] ⚠️  loadRewardedVideoAd: SDK not ready');
+    console.warn('[UnityAds] Load skipped — SDK not ready');
+    return;
+  }
+  if (_loadInProgress) {
+    console.log('[UnityAds] Load skipped — already in progress (mutex)');
     return;
   }
 
-  for (let attempt = 1; attempt <= MAX_LOAD_RETRIES; attempt++) {
-    try {
-      console.log(`[UnityAds] 📥 LOAD REWARDED — attempt ${attempt}/${MAX_LOAD_RETRIES}`);
-      console.log('[UnityAds]    Game ID   :', UNITY_GAME_ID, '| Placement:', PLACEMENTS.REWARDED);
-      console.log('[UnityAds]    Test Mode :', UNITY_TEST_MODE, '| Timeout:', LOAD_TIMEOUT_MS / 1000, 's');
+  _loadInProgress = true;
+  console.log(`[UnityAds] 📥 Loading rewarded${silent ? ' (silent pre-load)' : ''} — Game ID:`, UNITY_GAME_ID);
 
-      if (attempt > 1) setStatus('retrying');
+  try {
+    await withTimeout(
+      UnityAdsPlugin.loadRewardedVideo({ placementId: PLACEMENTS.REWARDED }),
+      LOAD_TIMEOUT_MS,
+      'loadRewardedVideo'
+    );
 
-      await withTimeout(
-        UnityAdsPlugin.loadRewardedVideo({ placementId: PLACEMENTS.REWARDED }),
-        LOAD_TIMEOUT_MS,
-        `loadRewardedVideo attempt ${attempt}`
-      );
+    rewardedLoaded = true;
+    _lastErrorCode = 'NONE';
+    _retryCount    = 0;          // reset failure count on success
+    clearRetryTimer();           // cancel any pending auto-retry
+    setStatus('rewarded_loaded');
+    console.log('[UnityAds] ✅ Rewarded ad loaded');
 
-      rewardedLoaded = true;
-      _lastErrorCode = 'NONE';
-      setStatus('rewarded_loaded');
-      console.log('[UnityAds] ✅ REWARDED AD LOADED — attempt', attempt, '/', MAX_LOAD_RETRIES);
-      return;
+  } catch (err: unknown) {
+    rewardedLoaded = false;
+    const msg  = err instanceof Error ? err.message : String(err);
+    const code = parseErrorCode(msg);
+    _lastErrorCode = code;
+    _retryCount++;
 
-    } catch (err: unknown) {
-      rewardedLoaded = false;
-      const msg  = err instanceof Error ? err.message : String(err);
-      const code = parseErrorCode(msg);
-      _lastErrorCode = code;
+    console.error(`[UnityAds] ❌ Load FAILED — Code: ${code} | attempt ${_retryCount}/${MAX_AUTO_RETRIES}`);
 
-      console.error(`[UnityAds] ❌ onUnityAdsFailedToLoad [Rewarded] attempt ${attempt}/${MAX_LOAD_RETRIES}`);
-      console.error('[UnityAds]    Error Code:', code, '| Game ID:', UNITY_GAME_ID);
-      console.error('[UnityAds]    Full Error:', msg);
-
-      if (code === 'NO_FILL') {
-        console.error('[UnityAds]    → NO_FILL: no ads to serve. testMode=true means this should NOT happen.');
-        console.error('[UnityAds]    → Verify Game ID in Unity Dashboard + Rewarded_Android placement is ACTIVE.');
-      } else if (code === 'INVALID_ARGUMENT') {
-        console.error('[UnityAds]    → INVALID_ARGUMENT: Game ID or placement ID is wrong!');
-      } else if (code === 'NETWORK_ERROR') {
-        console.error('[UnityAds]    → NETWORK_ERROR: Device cannot reach Unity Ads servers.');
-      } else if (code === 'TIMEOUT') {
-        console.error('[UnityAds]    → TIMEOUT: Unity server too slow. Will retry.');
-      } else if (code === 'INTERNAL_ERROR') {
-        console.error('[UnityAds]    → INTERNAL_ERROR: Unity SDK internal failure. Will retry.');
-      }
-
-      if (attempt < MAX_LOAD_RETRIES) {
-        console.log(`[UnityAds] 🔄 Retry in ${RETRY_DELAY_MS / 1000}s...`);
-        setStatus('retrying');
-        await sleep(RETRY_DELAY_MS);
-      } else {
-        setStatus('load_failed');
-        console.error('[UnityAds] ❌ All', MAX_LOAD_RETRIES, 'attempts failed. Last code:', code);
-        scheduleBackgroundRetry();
-      }
+    if (_retryCount >= MAX_AUTO_RETRIES) {
+      // ── Permanent graceful failure ─────────────────────────
+      clearRetryTimer();
+      setStatus('load_failed');
+      console.error('[UnityAds] Max retries reached. Showing graceful fallback.');
+      console.error('[UnityAds] User can click Retry to try again manually.');
+    } else if (!silent) {
+      // ── Auto-retry with exponential backoff ────────────────
+      const delay = BACKOFF_MS[_retryCount - 1] ?? 120_000;
+      setStatus('load_failed');   // show failed state while we wait
+      console.log(`[UnityAds] ⏰ Auto-retry in ${delay / 1000}s (backoff step ${_retryCount})`);
+      clearRetryTimer();
+      _retryTimer = setTimeout(() => {
+        _retryTimer = null;
+        if (sdkReady && !rewardedLoaded && !_loadInProgress) {
+          console.log('[UnityAds] 🔄 Auto-retry firing...');
+          loadRewardedVideoAd(false);
+        }
+      }, delay);
+    } else {
+      // Silent pre-load failure — don't touch status or schedule retry
+      console.warn('[UnityAds] Silent pre-load failed. Ad will load on next manual request.');
     }
+  } finally {
+    _loadInProgress = false;
   }
 }
 
-function scheduleBackgroundRetry(): void {
-  if (_retryTimer) clearTimeout(_retryTimer);
-  console.log('[UnityAds] ⏰ Background retry scheduled in 60s...');
-  _retryTimer = setTimeout(async () => {
-    _retryTimer = null;
-    if (!sdkReady) return;
-    console.log('[UnityAds] 🔄 Background retry firing...');
-    await loadRewardedVideoAd();
-  }, 60_000);
-}
-
+// ── MANUAL RETRY (called from UI "Retry" button) ──────────────
 export async function retryLoadAds(): Promise<void> {
-  if (_retryTimer) { clearTimeout(_retryTimer); _retryTimer = null; }
-  console.log('[UnityAds] 🔁 Manual retry | Game ID:', UNITY_GAME_ID, '| testMode:', UNITY_TEST_MODE);
+  console.log('[UnityAds] 🔁 Manual retry triggered');
+  clearRetryTimer();
+  _retryCount = 0;   // reset counter for manual retry
+
   if (!sdkReady) {
+    initPromise = null;   // allow re-init
     await initializeUnityAds();
     return;
   }
-  await Promise.allSettled([loadRewardedVideoAd(), loadInterstitialAd()]);
+  await loadRewardedVideoAd(false);
 }
 
-// ─── LOAD INTERSTITIAL ───────────────────────────────────────
+// ── LOAD INTERSTITIAL ─────────────────────────────────────────
 export async function loadInterstitialAd(): Promise<void> {
   if (!sdkReady) return;
   try {
-    console.log('[UnityAds] 📥 Loading interstitial — placement:', PLACEMENTS.INTERSTITIAL, '| testMode:', UNITY_TEST_MODE);
     await withTimeout(
       UnityAdsPlugin.loadInterstitial({ placementId: PLACEMENTS.INTERSTITIAL }),
       LOAD_TIMEOUT_MS, 'loadInterstitial'
     );
     interstitialLoaded = true;
-    console.log('[UnityAds] ✅ Interstitial LOADED');
+    console.log('[UnityAds] ✅ Interstitial loaded');
   } catch (err: unknown) {
     interstitialLoaded = false;
-    const code = parseErrorCode(err instanceof Error ? err.message : String(err));
-    console.error('[UnityAds] ❌ Interstitial load failed — Code:', code);
+    console.warn('[UnityAds] ℹ️  Interstitial load failed (non-critical):', parseErrorCode(err instanceof Error ? err.message : String(err)));
   }
 }
 
-// ─── SHOW REWARDED AD ─────────────────────────────────────────
+// ── SHOW REWARDED AD ─────────────────────────────────────────
 export async function showRewardedAd(
   userId: string,
   checkServerLimits: () => Promise<{ allowed: boolean; reason?: string }>
 ): Promise<AdResult> {
-  const now = Date.now();
-  if (now - lastAdCompletedAt < COOLDOWN_MS) {
-    const remaining = Math.ceil((COOLDOWN_MS - (now - lastAdCompletedAt)) / 1000);
-    console.warn('[UnityAds] ⏳ Cooldown —', remaining, 's left');
+  // ── Cooldown check ────────────────────────────────────────
+  const elapsed = Date.now() - lastAdCompletedAt;
+  if (elapsed < COOLDOWN_MS) {
+    const wait = Math.ceil((COOLDOWN_MS - elapsed) / 1000);
+    console.warn(`[UnityAds] ⏳ Cooldown: ${wait}s remaining`);
     return { success: false, reason: 'cooldown' };
   }
 
-  const serverCheck = await checkServerLimits();
-  if (!serverCheck.allowed) {
-    console.warn('[UnityAds] 🚫 Server limit:', serverCheck.reason);
-    return { success: false, reason: serverCheck.reason === 'cooldown' ? 'cooldown' : 'daily_limit' };
+  // ── Server eligibility ────────────────────────────────────
+  const { allowed, reason } = await checkServerLimits();
+  if (!allowed) {
+    console.warn('[UnityAds] 🚫 Server limit:', reason);
+    return { success: false, reason: reason === 'cooldown' ? 'cooldown' : 'daily_limit' };
   }
 
+  // ── SDK guard ─────────────────────────────────────────────
   if (!sdkReady) {
     await initializeUnityAds();
     if (!sdkReady) return { success: false, reason: 'not_available' };
   }
 
+  // ── On-demand load if not pre-loaded ──────────────────────
   if (!rewardedLoaded) {
-    console.log('[UnityAds] 🔄 Not loaded — on-demand load...');
-    await loadRewardedVideoAd();
+    console.log('[UnityAds] On-demand load (not pre-loaded)...');
+    await loadRewardedVideoAd(false);
     if (!rewardedLoaded) return { success: false, reason: 'not_available' };
   }
 
+  // ── Show the ad ───────────────────────────────────────────
   try {
     console.log('[UnityAds] ▶️  Showing rewarded ad | testMode:', UNITY_TEST_MODE);
-    rewardedLoaded = false;
+    rewardedLoaded = false;   // mark consumed BEFORE show to prevent double-show
     const result = await UnityAdsPlugin.showRewardedVideo();
     console.log('[UnityAds] 📊 Result:', JSON.stringify(result));
-    loadRewardedVideoAd(); // pre-load next
+
+    // Silent pre-load for next ad (mutex prevents double load)
+    loadRewardedVideoAd(true);
 
     if (result.success) {
       lastAdCompletedAt = Date.now();
-      console.log('[UnityAds] 🎉 REWARD EARNED — +0.2 coins');
+      console.log('[UnityAds] 🎉 Reward earned! +0.2 coins');
       return { success: true, reward: 0.2 };
     }
-    console.warn('[UnityAds] ⏭️  Skipped/closed — no reward');
+
+    console.warn('[UnityAds] ⏭️  Skipped / not completed — no reward');
     return { success: false, reason: 'not_completed' };
+
   } catch (err: unknown) {
     rewardedLoaded = false;
     const code = parseErrorCode(err instanceof Error ? err.message : String(err));
-    console.error('[UnityAds] ❌ showRewardedVideo failed — Code:', code);
-    loadRewardedVideoAd();
+    console.error('[UnityAds] ❌ showRewardedVideo error — Code:', code);
+    loadRewardedVideoAd(true);  // silent recovery pre-load
     return { success: false, reason: 'not_available' };
   }
 }
 
-// ─── SHOW INTERSTITIAL ───────────────────────────────────────
+// ── SHOW INTERSTITIAL ─────────────────────────────────────────
 export async function showInterstitialAd(): Promise<AdResult> {
   if (!sdkReady) {
     await initializeUnityAds();
@@ -324,33 +318,27 @@ export async function showInterstitialAd(): Promise<AdResult> {
     interstitialLoaded = false;
     const result = await UnityAdsPlugin.showInterstitial();
     loadInterstitialAd();
-    if (result.success) return { success: true, reward: 0.2 };
-    return { success: false, reason: 'not_completed' };
+    return result.success
+      ? { success: true, reward: 0.2 }
+      : { success: false, reason: 'not_completed' };
   } catch (err: unknown) {
     interstitialLoaded = false;
-    const code = parseErrorCode(err instanceof Error ? err.message : String(err));
-    console.error('[UnityAds] ❌ showInterstitial failed — Code:', code);
     loadInterstitialAd();
     return { success: false, reason: 'not_available' };
   }
 }
 
-// ─── DIAGNOSTICS ─────────────────────────────────────────────
+// ── DIAGNOSTICS ───────────────────────────────────────────────
 export function unityAdsDiagnostics(): void {
-  console.log('=== [UnityAds DIAGNOSTICS] ===');
-  console.log('  SDK Ready          :', sdkReady);
-  console.log('  SDK Version        :', _sdkVersion);
-  console.log('  UI Status          :', _uiStatus);
-  console.log('  Last Error Code    :', _lastErrorCode);
-  console.log('  Game ID            :', UNITY_GAME_ID);
-  console.log('  Project ID         :', UNITY_PROJECT_ID);
-  console.log('  Test Mode          :', UNITY_TEST_MODE, '← test ads ON');
-  console.log('  Rewarded Loaded    :', rewardedLoaded);
-  console.log('  Interstitial Loaded:', interstitialLoaded);
-  console.log('  Rewarded Placement :', PLACEMENTS.REWARDED);
-  console.log('  Interstitial Place :', PLACEMENTS.INTERSTITIAL);
-  console.log('  Load Timeout       :', LOAD_TIMEOUT_MS / 1000, 's');
-  console.log('  Retries            :', MAX_LOAD_RETRIES, 'x', RETRY_DELAY_MS / 1000, 's apart');
-  console.log('  Cooldown           :', COOLDOWN_MS / 1000, 's');
-  console.log('==============================');
+  console.log('═══ [UnityAds DIAGNOSTICS v6] ═══');
+  console.log('  Game ID         :', UNITY_GAME_ID, '| testMode:', UNITY_TEST_MODE);
+  console.log('  SDK Ready       :', sdkReady, '| Version:', _sdkVersion);
+  console.log('  Status          :', _uiStatus);
+  console.log('  Last Error      :', _lastErrorCode);
+  console.log('  Rewarded Loaded :', rewardedLoaded);
+  console.log('  Load In Progress:', _loadInProgress);
+  console.log('  Retry Count     :', _retryCount, '/', MAX_AUTO_RETRIES);
+  console.log('  Retry Timer     :', _retryTimer !== null ? 'scheduled' : 'none');
+  console.log('  Cooldown Left   :', Math.max(0, Math.ceil((COOLDOWN_MS - (Date.now() - lastAdCompletedAt)) / 1000)), 's');
+  console.log('═════════════════════════════════');
 }
