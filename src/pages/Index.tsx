@@ -13,6 +13,7 @@ import { SupportButtons }  from '@/components/SupportButtons';
 import { ReferralSection } from '@/components/ReferralSection';
 import { LivePaymentTicker } from '@/components/LivePaymentTicker';
 import { TreasureChest }   from '@/components/TreasureChest';
+import { SurveyButton }    from '@/components/SurveyButton';
 import { CpxSurvey }       from '@/components/CpxSurvey';
 import { UnityTestBanner } from '@/components/UnityAdsStatus';
 import LoadingScreen from '@/components/LoadingScreen';
@@ -23,7 +24,7 @@ import { toast } from 'sonner';
 
 type Tab = 'home' | 'leaderboard' | 'wallet' | 'tasks';
 
-// Server-side ad eligibility check (50/day + 30s cooldown)
+// ── Server-side ad eligibility check ─────────────────────────
 const checkAdLimits = async (userId: string): Promise<{ allowed: boolean; reason?: string }> => {
   try {
     const res = await fetch('/api/ads/check', {
@@ -33,11 +34,11 @@ const checkAdLimits = async (userId: string): Promise<{ allowed: boolean; reason
     });
     return await res.json();
   } catch {
-    return { allowed: true }; // fail-open for UX; server also validates
+    return { allowed: true }; // fail-open; server also validates
   }
 };
 
-// Record ad completion on server (updates streak, referral 2.0)
+// ── Record completed ad on server (streak + referral 2.0) ────
 const recordAdComplete = async (userId: string): Promise<void> => {
   try {
     const res = await fetch('/api/ads/complete', {
@@ -59,7 +60,7 @@ const Index = () => {
   const { user, loading: authLoading } = useSimpleAuth();
   const navigate = useNavigate();
 
-  // CPX Survey state — shown after each successful rewarded ad
+  // CPX Survey overlay state
   const [showCpxSurvey, setShowCpxSurvey] = useState(false);
 
   const {
@@ -68,33 +69,34 @@ const Index = () => {
     loading: coinsLoading,
   } = useCoinsDB();
 
+  // ── Auth guard ────────────────────────────────────────────
   useEffect(() => {
     if (!authLoading && !user) navigate('/auth');
   }, [user, authLoading, navigate]);
 
-  // Initialize Unity Ads once — no re-initialization loops
+  // ── Initialize Unity Ads ONCE on mount ───────────────────
   useEffect(() => {
-    initializeUnityAds().then(() => {
-      unityAdsDiagnostics();
-    });
-    // No deps — runs ONCE on mount only
+    initializeUnityAds().then(() => unityAdsDiagnostics());
+    // Empty deps — intentional: runs only once
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ── Ad limit check (server-side) ─────────────────────────
   const handleCheckAdLimits = useCallback(
     () => checkAdLimits(user?.id ?? ''),
     [user?.id]
   );
 
-  // Called by MegaTask when a rewarded ad is SUCCESSFULLY completed
+  // ── Unified ad completion callback ───────────────────────
+  // Called by MegaTask when a rewarded ad is SUCCESSFULLY watched
   const handleAdWatched = useCallback(async (reward: number) => {
-    watchAd();               // update local count
-    addCoins(reward);        // credit coins atomically
-    if (user?.id) {
-      await recordAdComplete(user.id);  // update streak + referral 2.0
-    }
-    setShowCpxSurvey(true);  // show CPX survey after every ad
+    watchAd();
+    addCoins(reward);
+    if (user?.id) await recordAdComplete(user.id);
+    setShowCpxSurvey(true);   // show CPX survey after every ad
   }, [watchAd, addCoins, user?.id]);
 
+  // ── CPX Survey reward handler ─────────────────────────────
   const handleCpxReward = useCallback((coins: number) => {
     addCoins(coins, 'survey_reward');
     toast.success(`🎉 Survey complete! +${coins} coins!`);
@@ -111,22 +113,29 @@ const Index = () => {
           <div className="space-y-4">
             <CoinDisplay coins={totalCoins} rupees={rupeesValue} />
 
-            {/* Unity Ads test banner — only visible when testMode=true */}
+            {/* Unity Ads status — visible only in testMode */}
             <UnityTestBanner />
 
             <LivePaymentTicker />
 
-            {/* Treasure Chest — 7-day streak feature */}
+            {/* 7-Day Streak Treasure Chest */}
             <TreasureChest onBonusClaimed={addCoins} adsWatched={adsWatched} />
+
+            {/* Survey shortcut button — below Treasure Chest */}
+            <SurveyButton
+              onOpen={() => setShowCpxSurvey(true)}
+              disabled={showCpxSurvey}
+              loading={showCpxSurvey}
+            />
 
             <MegaTask
               adsWatched={adsWatched}
-              onAdWatched={() => {}}        // local count handled in handleAdWatched
-              onRewardClaimed={() => {}}    // reward handled in handleAdWatched
+              onAdWatched={() => {}}
+              onRewardClaimed={() => {}}
               onReset={resetAdsWatched}
               userId={user.id}
               onCheckAdLimits={handleCheckAdLimits}
-              onAdCompleted={handleAdWatched}  // NEW: unified callback
+              onAdCompleted={handleAdWatched}
             />
 
             <div className="grid grid-cols-2 gap-4">
@@ -176,7 +185,7 @@ const Index = () => {
       <SupportButtons />
       <BottomNav activeTab={activeTab} onTabChange={setActiveTab} />
 
-      {/* CPX Survey overlay — shown after every successful rewarded ad */}
+      {/* CPX Survey overlay */}
       <CpxSurvey
         visible={showCpxSurvey}
         onClose={() => setShowCpxSurvey(false)}
