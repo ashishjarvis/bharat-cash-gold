@@ -27,7 +27,7 @@ import { UnityAds as UnityAdsPlugin } from 'capacitor-unity-ads';
 // ── Public constants (exported so components can log them) ────
 export const UNITY_PROJECT_ID = 'db811c8a-0baf-4a79-bed2-441b81170297';
 export const UNITY_GAME_ID    = '6104683';
-export const UNITY_TEST_MODE  = true;
+export const UNITY_TEST_MODE  = false;
 
 // Placement IDs must match Unity Dashboard configuration
 export const PLACEMENTS = {
@@ -166,7 +166,7 @@ export async function initializeUnityAds(): Promise<void> {
   initPromise = (async () => {
     try {
       // HARDCODED: gameId and testMode are literals — never dynamic variables
-      await UnityAdsPlugin.initialize({ gameId: '6104683', testMode: true });
+      await UnityAdsPlugin.initialize({ gameId: '6104683', testMode: false });
 
       try {
         const v = await UnityAdsPlugin.getVersion();
