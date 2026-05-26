@@ -14,12 +14,12 @@ interface SimpleAuthContextType {
   loading: boolean;
   signUp: (name: string, mobile: string, password: string) => Promise<{ error: string | null }>;
   signIn: (mobile: string, password: string) => Promise<{ error: string | null }>;
+  signInWithGoogle: () => Promise<{ error: string | null }>;
   signOut: () => void;
 }
 
 const SimpleAuthContext = createContext<SimpleAuthContextType | undefined>(undefined);
 
-// Simple hash function for password (in production, use bcrypt on server)
 const hashPassword = async (password: string): Promise<string> => {
   const encoder = new TextEncoder();
   const data = encoder.encode(password + 'bharat_cash_salt');
@@ -29,15 +29,14 @@ const hashPassword = async (password: string): Promise<string> => {
 };
 
 export const SimpleAuthProvider = ({ children }: { children: ReactNode }) => {
-  const [user, setUser] = useState<UserProfile | null>(null);
+  const [user, setUser]       = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Check for existing session on mount
+  // ── Restore session on mount ─────────────────────────────
   useEffect(() => {
     const storedUserId = localStorage.getItem('bharat_cash_user_id');
-    
+
     if (storedUserId) {
-      // Fetch user profile from DB
       supabase
         .from('profiles')
         .select('id, display_name, mobile_number, total_coins, lifetime_earnings')
@@ -58,85 +57,78 @@ export const SimpleAuthProvider = ({ children }: { children: ReactNode }) => {
           setLoading(false);
         });
     } else {
-      setLoading(false);
+      // Also check if a Supabase OAuth session exists (e.g. after redirect)
+      supabase.auth.getSession().then(async ({ data: { session } }) => {
+        if (session?.user?.email) {
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('id, display_name, mobile_number, total_coins, lifetime_earnings')
+            .eq('email', session.user.email)
+            .maybeSingle();
+
+          if (profile) {
+            localStorage.setItem('bharat_cash_user_id', profile.id);
+            setUser({
+              id: profile.id,
+              display_name: profile.display_name || 'User',
+              mobile_number: profile.mobile_number || '',
+              total_coins: Number(profile.total_coins) || 0,
+              lifetime_earnings: Number(profile.lifetime_earnings) || 0,
+            });
+          }
+        }
+        setLoading(false);
+      });
     }
   }, []);
 
+  // ── Sign Up (mobile + password) ──────────────────────────
   const signUp = async (name: string, mobile: string, password: string): Promise<{ error: string | null }> => {
     try {
-      // Check if mobile already exists
       const { data: existing } = await supabase
         .from('profiles')
         .select('id')
         .eq('mobile_number', mobile)
         .maybeSingle();
 
-      if (existing) {
-        return { error: 'Mobile number already registered. Please login.' };
-      }
+      if (existing) return { error: 'Mobile number already registered. Please login.' };
 
-      // Hash password
       const passwordHash = await hashPassword(password);
-
-      // Generate unique ID
       const id = crypto.randomUUID();
 
-      // Create profile
-      const { error } = await supabase
-        .from('profiles')
-        .insert({
-          id,
-          display_name: name,
-          mobile_number: mobile,
-          password_hash: passwordHash,
-          total_coins: 0,
-          lifetime_earnings: 0,
-        });
+      const { error } = await supabase.from('profiles').insert({
+        id, display_name: name, mobile_number: mobile, password_hash: passwordHash,
+        total_coins: 0, lifetime_earnings: 0,
+      });
 
       if (error) {
         console.error('Signup error:', error);
         return { error: 'Failed to create account. Please try again.' };
       }
 
-      // Set session
       localStorage.setItem('bharat_cash_user_id', id);
-      setUser({
-        id,
-        display_name: name,
-        mobile_number: mobile,
-        total_coins: 0,
-        lifetime_earnings: 0,
-      });
-
+      setUser({ id, display_name: name, mobile_number: mobile, total_coins: 0, lifetime_earnings: 0 });
       return { error: null };
+
     } catch (err) {
       console.error('Signup error:', err);
       return { error: 'An unexpected error occurred.' };
     }
   };
 
+  // ── Sign In (mobile + password) ──────────────────────────
   const signIn = async (mobile: string, password: string): Promise<{ error: string | null }> => {
     try {
-      // Hash password
       const passwordHash = await hashPassword(password);
-
-      // Find user
       const { data, error } = await supabase
         .from('profiles')
         .select('id, display_name, mobile_number, password_hash, total_coins, lifetime_earnings')
         .eq('mobile_number', mobile)
         .maybeSingle();
 
-      if (error || !data) {
-        return { error: 'Mobile number not found. Please sign up.' };
-      }
+      if (error || !data) return { error: 'Mobile number not found. Please sign up.' };
+      if (data.password_hash !== passwordHash) return { error: 'Incorrect password. Please try again.' };
 
-      // Check password
-      if (data.password_hash !== passwordHash) {
-        return { error: 'Incorrect password. Please try again.' };
-      }
-
-      // Set session
       localStorage.setItem('bharat_cash_user_id', data.id);
       setUser({
         id: data.id,
@@ -145,21 +137,54 @@ export const SimpleAuthProvider = ({ children }: { children: ReactNode }) => {
         total_coins: Number(data.total_coins) || 0,
         lifetime_earnings: Number(data.lifetime_earnings) || 0,
       });
-
       return { error: null };
+
     } catch (err) {
       console.error('Login error:', err);
       return { error: 'An unexpected error occurred.' };
     }
   };
 
+  // ── Google Sign-In (Supabase OAuth) ──────────────────────
+  // Opens Google OAuth in the browser. On redirect, /auth/callback
+  // bridges the Supabase session → our custom profiles table.
+  const signInWithGoogle = async (): Promise<{ error: string | null }> => {
+    try {
+      const redirectTo = `${window.location.origin}/auth/callback`;
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo,
+          queryParams: {
+            access_type: 'offline',
+            prompt: 'consent',
+          },
+        },
+      });
+
+      if (error) {
+        console.error('[GoogleAuth] OAuth error:', error.message);
+        return { error: 'Google Sign-In failed. Please try mobile login.' };
+      }
+
+      // OAuth redirects the page — this line is never reached
+      return { error: null };
+
+    } catch (err) {
+      console.error('[GoogleAuth] Unexpected error:', err);
+      return { error: 'Google Sign-In is not available right now. Please use mobile login.' };
+    }
+  };
+
+  // ── Sign Out ──────────────────────────────────────────────
   const signOut = () => {
     localStorage.removeItem('bharat_cash_user_id');
+    supabase.auth.signOut().catch(() => {}); // also clear Supabase OAuth session if present
     setUser(null);
   };
 
   return (
-    <SimpleAuthContext.Provider value={{ user, loading, signUp, signIn, signOut }}>
+    <SimpleAuthContext.Provider value={{ user, loading, signUp, signIn, signInWithGoogle, signOut }}>
       {children}
     </SimpleAuthContext.Provider>
   );
@@ -167,8 +192,6 @@ export const SimpleAuthProvider = ({ children }: { children: ReactNode }) => {
 
 export const useSimpleAuth = () => {
   const context = useContext(SimpleAuthContext);
-  if (context === undefined) {
-    throw new Error('useSimpleAuth must be used within a SimpleAuthProvider');
-  }
+  if (context === undefined) throw new Error('useSimpleAuth must be used within a SimpleAuthProvider');
   return context;
 };
