@@ -1,6 +1,6 @@
 // ============================================================
 // REAL UNITY ADS — Capacitor Plugin Bridge
-// Android Game ID : 6104683   testMode : TRUE (hardcoded literal)
+// Android Game ID : 6104683   testMode : false (LIVE ADS)
 // ============================================================
 // Lifecycle:
 //   1. initializeUnityAds()     — called ONCE at app startup
@@ -158,7 +158,7 @@ export async function initializeUnityAds(): Promise<void> {
   console.log('[UnityAds] ══════════════════════════════════════');
   console.log('[UnityAds] 🚀 INIT START');
   console.log('[UnityAds]    Game ID   :', '6104683',            '← hardcoded');
-  console.log('[UnityAds]    testMode  :', true,                 '← hardcoded literal');
+  console.log('[UnityAds]    testMode  :', false,                '← live ads (hardcoded false)');
   console.log('[UnityAds]    Placement :', PLACEMENTS.REWARDED);
   console.log('[UnityAds]    Bundle    : com.ashish.bharatcash');
   console.log('[UnityAds] ══════════════════════════════════════');
@@ -210,10 +210,10 @@ export async function loadRewardedVideoAd(silent = false): Promise<void> {
   }
 
   _loadInProgress = true;
-  console.log(`[UnityAds] 📥 PRELOAD START${silent ? ' (silent)' : ''} — placement: Rewarded_Android | testMode: true`);
+  console.log(`[UnityAds] 📥 PRELOAD START${silent ? ' (silent)' : ''} — placement: Rewarded_Android | testMode: false (live)`);
 
   try {
-    // HARDCODED placement string — explicit test placement
+    // HARDCODED placement string — must match Unity Dashboard placement name
     await withTimeout(
       UnityAdsPlugin.loadRewardedVideo({ placementId: 'Rewarded_Android' }),
       LOAD_TIMEOUT_MS,
@@ -243,7 +243,7 @@ export async function loadRewardedVideoAd(silent = false): Promise<void> {
     if (msg.toLowerCase().includes('admarkup is missing')) {
       _adMarkupRetryCount++;
       console.warn(`[UnityAds] ⚠️  adMarkup is missing (×${_adMarkupRetryCount}/${MAX_ADMARKUP_RETRIES})`);
-      console.warn('[UnityAds]    testMode=true hardcoded. CDN delivery delay — will retry in 5s.');
+      console.warn('[UnityAds]    testMode=false (live). CDN delivery delay — will retry in 5s.');
 
       if (_adMarkupRetryCount <= MAX_ADMARKUP_RETRIES) {
         setStatus('ready');   // UI stays stable — no red error
@@ -251,7 +251,7 @@ export async function loadRewardedVideoAd(silent = false): Promise<void> {
         _retryTimer = setTimeout(() => {
           _retryTimer = null;
           if (sdkReady && !rewardedLoaded && !_loadInProgress) {
-            console.log('[UnityAds] 🔄 adMarkup auto-retry firing — Rewarded_Android, testMode=true');
+            console.log('[UnityAds] 🔄 adMarkup auto-retry firing — Rewarded_Android, testMode=false');
             loadRewardedVideoAd(false);
           }
         }, 5_000);
@@ -265,6 +265,17 @@ export async function loadRewardedVideoAd(silent = false): Promise<void> {
       // ── Standard failure — exponential backoff ─────────────
       _permRetryCount++;
       console.error(`[UnityAds] ❌ PRELOAD FAILED — Code: ${code} | attempt ${_permRetryCount}/${MAX_PERM_RETRIES}`);
+      if (code === 'NO_FILL') {
+        console.error('[UnityAds]    NO_FILL: no live ad inventory available right now.');
+        console.error('[UnityAds]    Check: placement "Rewarded_Android" is ACTIVE in Unity Dashboard.');
+        console.error('[UnityAds]    Check: app bundle "com.ashish.bharatcash" is registered.');
+        console.error('[UnityAds]    Note:  Fill rate improves once app is live on Play Store.');
+      } else if (code === 'INVALID_ARGUMENT') {
+        console.error('[UnityAds]    INVALID_ARGUMENT: Game ID or placement ID mismatch!');
+        console.error('[UnityAds]    Game ID in use: 6104683 | Placement: Rewarded_Android');
+      } else if (code === 'NETWORK_ERROR') {
+        console.error('[UnityAds]    NETWORK_ERROR: Device cannot reach Unity Ads servers.');
+      }
 
       if (_permRetryCount >= MAX_PERM_RETRIES) {
         clearRetryTimer();
@@ -397,7 +408,7 @@ export async function showRewardedAd(
   }
 
   // 6. Show the ad ───────────────────────────────────────────────
-  console.log('[UnityAds] ▶️  SHOW REWARDED — placement: Rewarded_Android | testMode: true (hardcoded)');
+  console.log('[UnityAds] ▶️  SHOW REWARDED — placement: Rewarded_Android | testMode: false (live)');
   try {
     rewardedLoaded = false;  // mark consumed BEFORE show to prevent double-show race
     const result = await UnityAdsPlugin.showRewardedVideo();
@@ -453,7 +464,7 @@ export async function showInterstitialAd(): Promise<AdResult> {
 export function unityAdsDiagnostics(): void {
   console.log('═══════ [UnityAds DIAGNOSTICS] ═══════');
   console.log('  Game ID             :', '6104683 (hardcoded)');
-  console.log('  testMode            :', 'true (hardcoded literal)');
+  console.log('  testMode            :', false, '← LIVE ADS (hardcoded false)');
   console.log('  Rewarded Placement  :', 'Rewarded_Android (hardcoded)');
   console.log('  SDK Ready           :', sdkReady, '| Version:', _sdkVersion);
   console.log('  Status              :', _uiStatus);
