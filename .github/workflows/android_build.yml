@@ -100,6 +100,22 @@ jobs:
             echo "❌ AndroidManifest.xml not found at $MANIFEST"
           fi
 
+      - name: Patch AndroidManifest — Add AdMob App ID (Test)
+        run: |
+          MANIFEST="android/app/src/main/AndroidManifest.xml"
+          ADMOB_TEST_APP_ID="ca-app-pub-3940256099942544~3347511713"
+          if [ -f "$MANIFEST" ]; then
+            if ! grep -q "com.google.android.gms.ads.APPLICATION_ID" "$MANIFEST"; then
+              sed -i "s|</application>|    <meta-data android:name=\"com.google.android.gms.ads.APPLICATION_ID\" android:value=\"$ADMOB_TEST_APP_ID\"/>\n    </application>|" "$MANIFEST"
+              echo "✅ Added AdMob test APPLICATION_ID meta-data"
+            else
+              echo "✅ AdMob APPLICATION_ID meta-data already present"
+            fi
+            grep "com.google.android.gms.ads.APPLICATION_ID" "$MANIFEST"
+          else
+            echo "❌ AndroidManifest.xml not found at $MANIFEST"
+          fi
+
       - name: Make Gradlew Executable
         run: chmod +x android/gradlew
 
