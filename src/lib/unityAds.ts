@@ -1,6 +1,6 @@
 // ============================================================
 // REAL UNITY ADS — Capacitor Plugin Bridge
-// Android Game ID : 6104683   testMode : false (LIVE ADS)
+// Android Game ID : 6104683   testMode : true (TEST/DEV BUILD)
 // ============================================================
 // Lifecycle:
 //   1. initializeUnityAds()     — called ONCE at app startup
@@ -27,7 +27,7 @@ import { UnityAds as UnityAdsPlugin } from 'capacitor-unity-ads';
 // ── Public constants (exported so components can log them) ────
 export const UNITY_PROJECT_ID = 'db811c8a-0baf-4a79-bed2-441b81170297';
 export const UNITY_GAME_ID    = '6104683';
-export const UNITY_TEST_MODE  = false;
+export const UNITY_TEST_MODE  = true;
 
 // Placement IDs must match Unity Dashboard configuration
 export const PLACEMENTS = {
@@ -158,7 +158,7 @@ export async function initializeUnityAds(): Promise<void> {
   console.log('[UnityAds] ══════════════════════════════════════');
   console.log('[UnityAds] 🚀 INIT START');
   console.log('[UnityAds]    Game ID   :', '6104683',            '← hardcoded');
-  console.log('[UnityAds]    testMode  :', false,                '← live ads (hardcoded false)');
+  console.log('[UnityAds]    testMode  :', true,                 '← TEST/DEV build (hardcoded true)');
   console.log('[UnityAds]    Placement :', PLACEMENTS.REWARDED);
   console.log('[UnityAds]    Bundle    : com.ashish.bharatcash');
   console.log('[UnityAds] ══════════════════════════════════════');
@@ -166,7 +166,7 @@ export async function initializeUnityAds(): Promise<void> {
   initPromise = (async () => {
     try {
       // HARDCODED: gameId and testMode are literals — never dynamic variables
-      await UnityAdsPlugin.initialize({ gameId: '6104683', testMode: false });
+      await UnityAdsPlugin.initialize({ gameId: '6104683', testMode: true });
 
       try {
         const v = await UnityAdsPlugin.getVersion();
@@ -210,7 +210,7 @@ export async function loadRewardedVideoAd(silent = false): Promise<void> {
   }
 
   _loadInProgress = true;
-  console.log(`[UnityAds] 📥 PRELOAD START${silent ? ' (silent)' : ''} — placement: Rewarded_Android | testMode: false (live)`);
+  console.log(`[UnityAds] 📥 PRELOAD START${silent ? ' (silent)' : ''} — placement: Rewarded_Android | testMode: true (dev)`);
 
   try {
     // HARDCODED placement string — must match Unity Dashboard placement name
@@ -243,7 +243,7 @@ export async function loadRewardedVideoAd(silent = false): Promise<void> {
     if (msg.toLowerCase().includes('admarkup is missing')) {
       _adMarkupRetryCount++;
       console.warn(`[UnityAds] ⚠️  adMarkup is missing (×${_adMarkupRetryCount}/${MAX_ADMARKUP_RETRIES})`);
-      console.warn('[UnityAds]    testMode=false (live). CDN delivery delay — will retry in 5s.');
+      console.warn('[UnityAds]    testMode=true (dev). CDN delivery delay — will retry in 5s.');
 
       if (_adMarkupRetryCount <= MAX_ADMARKUP_RETRIES) {
         setStatus('ready');   // UI stays stable — no red error
@@ -251,7 +251,7 @@ export async function loadRewardedVideoAd(silent = false): Promise<void> {
         _retryTimer = setTimeout(() => {
           _retryTimer = null;
           if (sdkReady && !rewardedLoaded && !_loadInProgress) {
-            console.log('[UnityAds] 🔄 adMarkup auto-retry firing — Rewarded_Android, testMode=false');
+            console.log('[UnityAds] 🔄 adMarkup auto-retry firing — Rewarded_Android, testMode=true');
             loadRewardedVideoAd(false);
           }
         }, 5_000);
@@ -408,7 +408,7 @@ export async function showRewardedAd(
   }
 
   // 6. Show the ad ───────────────────────────────────────────────
-  console.log('[UnityAds] ▶️  SHOW REWARDED — placement: Rewarded_Android | testMode: false (live)');
+  console.log('[UnityAds] ▶️  SHOW REWARDED — placement: Rewarded_Android | testMode: true (dev)');
   try {
     rewardedLoaded = false;  // mark consumed BEFORE show to prevent double-show race
     const result = await UnityAdsPlugin.showRewardedVideo();
@@ -464,7 +464,7 @@ export async function showInterstitialAd(): Promise<AdResult> {
 export function unityAdsDiagnostics(): void {
   console.log('═══════ [UnityAds DIAGNOSTICS] ═══════');
   console.log('  Game ID             :', '6104683 (hardcoded)');
-  console.log('  testMode            :', false, '← LIVE ADS (hardcoded false)');
+  console.log('  testMode            :', true, '← TEST/DEV build (hardcoded true)');
   console.log('  Rewarded Placement  :', 'Rewarded_Android (hardcoded)');
   console.log('  SDK Ready           :', sdkReady, '| Version:', _sdkVersion);
   console.log('  Status              :', _uiStatus);
