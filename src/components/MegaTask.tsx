@@ -3,7 +3,7 @@ import { Play, Trophy, CheckCircle, Loader2 } from 'lucide-react';
 import { Progress } from '@/components/ui/progress';
 import { CountdownButton } from './CountdownButton';
 import { AdLoadingOverlay } from './AdLoadingOverlay';
-import { showRewardedAd } from '@/lib/unityAds';
+import { showRewardedAdWithFallback } from '@/lib/adFallback';
 import { toast } from 'sonner';
 
 interface MegaTaskProps {
@@ -38,7 +38,7 @@ export const MegaTask = ({
     setIsLoadingAd(true);
 
     try {
-      const result = await showRewardedAd(userId, onCheckAdLimits);
+      const result = await showRewardedAdWithFallback(userId, onCheckAdLimits);
 
       if (result.success) {
         // If parent supplies unified callback, use it (handles streak/referral/CPX)
@@ -50,6 +50,8 @@ export const MegaTask = ({
           onRewardClaimed(result.reward);
         }
 
+        const networkLabel = result.network === 'admob' ? ' (AdMob fallback)' : '';
+
         if (adsWatched + 1 >= 10) {
           setShowReward(true);
           setTimeout(() => {
@@ -57,7 +59,7 @@ export const MegaTask = ({
             onReset();
           }, 2000);
         } else {
-          toast.success(`+${result.reward} coins earned!`);
+          toast.success(`+${result.reward} coins earned!${networkLabel}`);
         }
       } else {
         switch (result.reason) {
