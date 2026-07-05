@@ -20,6 +20,7 @@ import LoadingScreen from '@/components/LoadingScreen';
 import { useCoinsDB }      from '@/hooks/useCoinsDB';
 import { useSimpleAuth }   from '@/contexts/SimpleAuthContext';
 import { initializeUnityAds, unityAdsDiagnostics } from '@/lib/unityAds';
+import { initializeAdMob, adMobDiagnostics } from '@/lib/admob';
 import { toast } from 'sonner';
 
 type Tab = 'home' | 'leaderboard' | 'wallet' | 'tasks';
@@ -77,6 +78,13 @@ const Index = () => {
   // ── Initialize Unity Ads ONCE on mount ───────────────────
   useEffect(() => {
     initializeUnityAds().then(() => unityAdsDiagnostics());
+    // Empty deps — intentional: runs only once
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ── Initialize AdMob (test rewarded ads) ONCE on mount ────
+  useEffect(() => {
+    initializeAdMob().then(() => adMobDiagnostics());
     // Empty deps — intentional: runs only once
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
