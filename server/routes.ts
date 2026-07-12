@@ -591,9 +591,25 @@ export function registerRoutes(app: Express): Server {
   // ═══════════════════════════════════════════════════════════════════════
   app.all("/api/cpx/postback", async (req: Request, res: Response) => {
     const p = { ...req.query, ...req.body } as Record<string, string>;
-    const { status, trans_id, amount, user_id, subid_1 } = p;
+    const { status, trans_id, amount, user_id, subid_1, hash } = p;
 
-    console.log("[CPX] Postback received:", JSON.stringify(p));
+    console.log("[CPX] Postback received:", JSON.stringify({ status, trans_id, amount, user_id, subid_1 }));
+
+    // ── HMAC signature verification ───────────────────────────────────
+    // CPX Research signs postbacks as: md5(user_id + CPX_SECRET_HASH)
+    // Reject any postback that arrives without a valid signature.
+    if (CPX_SECRET_HASH && CPX_SECRET_HASH !== "WTUge88NbM") {
+      // Only enforce when a real secret has been configured (not the placeholder)
+      const expectedHash = createHash("md5")
+        .update(`${user_id}${CPX_SECRET_HASH}`)
+        .digest("hex");
+      if (!hash || hash !== expectedHash) {
+        console.error("[CPX] REJECTED — invalid HMAC signature. received:", hash, "expected:", expectedHash);
+        return res.status(403).send("error");
+      }
+    } else {
+      console.warn("[CPX] ⚠️  HMAC verification skipped — set CPX_SECRET_HASH env var to a real value to enable");
+    }
 
     // Validate: status must be 1 (completed)
     if (status !== "1") {
@@ -777,12 +793,98 @@ export function registerRoutes(app: Express): Server {
   });
 
   // ═══════════════════════════════════════════════════════════════════════
-  // MODULE 4: Forced app version check
+  // GAMEZONE: Claim play-time reward — 2 coins per 2 minutes, 50/day max
+  // ═══════════════════════════════════════════════════════════════════════
+  app.post("/api/gamezone/reward", async (req: Request, res: Response) => {
+    const { userId, sessionId, minuteBlock } = req.body as {
+      userId: string; sessionId: string; minuteBlock: number;
+    };
+
+    if (!userId || !sessionId || minuteBlock == null) {
+      return res.status(400).json({ error: "Missing required fields" });
+    }
+
+    const COINS_PER_BLOCK  = 2;
+    const DAILY_COIN_LIMIT = 50;
+
+    const idempotencyKey = `gamezone-${userId}-${sessionId}-${minuteBlock}`;
+
+    try {
+      // Idempotency: reject duplicate claims for the same minute block
+      const [dup] = await db.select()
+        .from(transactionLedger)
+        .where(eq(transactionLedger.idempotencyKey, idempotencyKey));
+      if (dup) {
+        return res.json({ success: false, error: "Already claimed for this block" });
+      }
+
+      // Sum today's GameZone earnings for this user
+      const today = new Date().toISOString().split("T")[0];
+      const startOfDay = new Date(`${today}T00:00:00.000Z`);
+
+      const todayRows = await db.select({ amount: transactionLedger.amount })
+        .from(transactionLedger)
+        .where(
+          and(
+            eq(transactionLedger.userId, userId),
+            eq(transactionLedger.actionType, "gamezone_reward"),
+            sql`timestamp >= ${startOfDay}`,
+          )
+        );
+
+      const earnedToday = todayRows.reduce((sum, r) => sum + (Number(r.amount) || 0), 0);
+
+      if (earnedToday >= DAILY_COIN_LIMIT) {
+        return res.json({ success: false, limitReached: true, totalToday: earnedToday });
+      }
+
+      // Cap so we never go over the daily limit
+      const coinsToAward = Math.min(COINS_PER_BLOCK, DAILY_COIN_LIMIT - earnedToday);
+      const newTotal     = earnedToday + coinsToAward;
+
+      // Atomic: credit coins + ledger entry
+      await db.transaction(async (tx) => {
+        const [profile] = await tx.select({ totalCoins: profiles.totalCoins })
+          .from(profiles).where(eq(profiles.id, userId));
+        if (!profile) throw new Error("Profile not found");
+
+        const balanceBefore = Number(profile.totalCoins) || 0;
+        const balanceAfter  = Math.round((balanceBefore + coinsToAward) * 10) / 10;
+
+        await tx.update(profiles)
+          .set({ totalCoins: String(balanceAfter), lifetimeEarnings: sql`lifetime_earnings + ${coinsToAward}` })
+          .where(eq(profiles.id, userId));
+
+        await tx.insert(transactionLedger).values({
+          userId,
+          actionType: "gamezone_reward",
+          amount: String(coinsToAward),
+          balanceBefore: String(balanceBefore),
+          balanceAfter:  String(balanceAfter),
+          idempotencyKey,
+        });
+      });
+
+      return res.json({
+        success:      true,
+        coinsAwarded: coinsToAward,
+        totalToday:   newTotal,
+        limitReached: newTotal >= DAILY_COIN_LIMIT,
+      });
+    } catch (err: any) {
+      console.error("[GameZone] Reward error:", err.message);
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // MODULE 4: Forced app version check + feature config
   // ═══════════════════════════════════════════════════════════════════════
   app.get("/api/config", (_req: Request, res: Response) => {
     res.json({
       minimum_app_version: process.env.MIN_APP_VERSION ?? "1.0.0",
       maintenance: false,
+      gamezone_url: process.env.GAMEZONE_URL ?? null,
     });
   });
 
