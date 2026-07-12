@@ -30,7 +30,9 @@ jobs:
           node-version: 24
 
       - name: Install Dependencies
-        run: npm install --legacy-peer-deps
+        run: |
+          npm config set registry https://registry.npmjs.org
+          npm install --legacy-peer-deps
 
       - name: Build Web Project
         run: npm run build
