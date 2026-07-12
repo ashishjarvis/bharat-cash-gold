@@ -20,13 +20,6 @@ interface SimpleAuthContextType {
 
 const SimpleAuthContext = createContext<SimpleAuthContextType | undefined>(undefined);
 
-const hashPassword = async (password: string): Promise<string> => {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(password + 'bharat_cash_salt');
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-};
 
 export const SimpleAuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser]       = useState<UserProfile | null>(null);
@@ -82,32 +75,26 @@ export const SimpleAuthProvider = ({ children }: { children: ReactNode }) => {
     }
   }, []);
 
-  // ── Sign Up (mobile + password) ──────────────────────────
+  // ── Sign Up (mobile + password) — hashing done server-side via bcrypt ──
   const signUp = async (name: string, mobile: string, password: string): Promise<{ error: string | null }> => {
     try {
-      const { data: existing } = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('mobile_number', mobile)
-        .maybeSingle();
-
-      if (existing) return { error: 'Mobile number already registered. Please login.' };
-
-      const passwordHash = await hashPassword(password);
-      const id = crypto.randomUUID();
-
-      const { error } = await supabase.from('profiles').insert({
-        id, display_name: name, mobile_number: mobile, password_hash: passwordHash,
-        total_coins: 0, lifetime_earnings: 0,
+      const res = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, mobile, password }),
       });
+      const data = await res.json();
 
-      if (error) {
-        console.error('Signup error:', error);
-        return { error: 'Failed to create account. Please try again.' };
-      }
+      if (!res.ok) return { error: data.error || 'Failed to create account. Please try again.' };
 
-      localStorage.setItem('bharat_cash_user_id', id);
-      setUser({ id, display_name: name, mobile_number: mobile, total_coins: 0, lifetime_earnings: 0 });
+      localStorage.setItem('bharat_cash_user_id', data.userId);
+      setUser({
+        id: data.userId,
+        display_name: data.displayName,
+        mobile_number: data.mobileNumber,
+        total_coins: 0,
+        lifetime_earnings: 0,
+      });
       return { error: null };
 
     } catch (err) {
@@ -116,26 +103,25 @@ export const SimpleAuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  // ── Sign In (mobile + password) ──────────────────────────
+  // ── Sign In (mobile + password) — verified server-side via bcrypt ───────
   const signIn = async (mobile: string, password: string): Promise<{ error: string | null }> => {
     try {
-      const passwordHash = await hashPassword(password);
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('id, display_name, mobile_number, password_hash, total_coins, lifetime_earnings')
-        .eq('mobile_number', mobile)
-        .maybeSingle();
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mobile, password }),
+      });
+      const data = await res.json();
 
-      if (error || !data) return { error: 'Mobile number not found. Please sign up.' };
-      if (data.password_hash !== passwordHash) return { error: 'Incorrect password. Please try again.' };
+      if (!res.ok) return { error: data.error || 'An unexpected error occurred.' };
 
-      localStorage.setItem('bharat_cash_user_id', data.id);
+      localStorage.setItem('bharat_cash_user_id', data.userId);
       setUser({
-        id: data.id,
-        display_name: data.display_name || 'User',
-        mobile_number: data.mobile_number || '',
-        total_coins: Number(data.total_coins) || 0,
-        lifetime_earnings: Number(data.lifetime_earnings) || 0,
+        id: data.userId,
+        display_name: data.displayName || 'User',
+        mobile_number: data.mobileNumber || '',
+        total_coins: data.totalCoins || 0,
+        lifetime_earnings: data.lifetimeEarnings || 0,
       });
       return { error: null };
 
