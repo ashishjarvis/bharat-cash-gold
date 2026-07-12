@@ -1,11 +1,15 @@
-import type { Express, Request, Response } from "express";
+import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
+import { createHash } from "crypto";
+import bcrypt from "bcryptjs";
 import { db } from "./db";
 import {
   profiles, withdrawals, referrals,
   transactionLedger, adLimits, userStreaks,
 } from "../shared/schema";
 import { eq, sql, desc, and } from "drizzle-orm";
+
+const BCRYPT_ROUNDS = 10;
 
 const AD_DAILY_LIMIT       = 50;
 const AD_COOLDOWN_MS       = 30_000;
@@ -20,6 +24,11 @@ function genTxnId(): string {
   return `BC${Date.now().toString(36).toUpperCase()}${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 }
 
+// ── Helper: SHA-256 (legacy only — for password migration) ───────────────
+function legacySha256Hash(password: string): string {
+  return createHash("sha256").update(password + "bharat_cash_salt").digest("hex");
+}
+
 // ── Helper: verify admin by userId ───────────────────────────────────────
 async function verifyAdmin(adminUserId: string): Promise<boolean> {
   const [admin] = await db.select({ isAdmin: profiles.isAdmin, mobile: profiles.mobileNumber })
@@ -27,7 +36,148 @@ async function verifyAdmin(adminUserId: string): Promise<boolean> {
   return !!(admin?.isAdmin || admin?.mobile === ADMIN_MOBILE);
 }
 
+// ── Middleware: require admin — applied to ALL /api/admin/* routes ────────
+// Reads adminUserId from: header X-Admin-User-Id > body.adminUserId > query.adminUserId
+const requireAdmin = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  const adminUserId = (
+    (req.headers["x-admin-user-id"] as string | undefined) ||
+    req.body?.adminUserId ||
+    (req.query?.adminUserId as string | undefined)
+  );
+
+  if (!adminUserId) {
+    res.status(403).json({ error: "Forbidden — admin authentication required" });
+    return;
+  }
+
+  try {
+    const isAdmin = await verifyAdmin(adminUserId);
+    if (!isAdmin) {
+      res.status(403).json({ error: "Forbidden — admin access denied" });
+      return;
+    }
+    // Attach verified adminId to request for downstream handlers
+    (req as any).verifiedAdminId = adminUserId;
+    next();
+  } catch {
+    res.status(500).json({ error: "Admin verification failed" });
+  }
+};
+
 export function registerRoutes(app: Express): Server {
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // SECURITY: Admin middleware — gates ALL /api/admin/* routes server-side
+  // Any request to /api/admin/* that doesn't pass verifyAdmin() gets 403.
+  // This runs BEFORE individual route handlers are evaluated.
+  // ═══════════════════════════════════════════════════════════════════════
+  app.use("/api/admin", requireAdmin);
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // AUTH: Secure registration — bcrypt password hashing server-side
+  // ═══════════════════════════════════════════════════════════════════════
+  app.post("/api/auth/register", async (req: Request, res: Response) => {
+    const { name, mobile, password } = req.body as {
+      name: string; mobile: string; password: string;
+    };
+    if (!name || !mobile || !password) {
+      return res.status(400).json({ error: "Missing required fields" });
+    }
+    if (password.length < 6) {
+      return res.status(400).json({ error: "Password must be at least 6 characters" });
+    }
+
+    try {
+      // Check if mobile already registered
+      const [existing] = await db.select({ id: profiles.id })
+        .from(profiles).where(eq(profiles.mobileNumber, mobile));
+      if (existing) {
+        return res.status(409).json({ error: "Mobile number already registered. Please login." });
+      }
+
+      const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+      const id = crypto.randomUUID();
+
+      await db.insert(profiles).values({
+        id,
+        displayName: name,
+        mobileNumber: mobile,
+        passwordHash,
+        totalCoins: "0",
+        lifetimeEarnings: "0",
+      });
+
+      return res.json({ success: true, userId: id, displayName: name, mobileNumber: mobile });
+    } catch (err: any) {
+      console.error("[Auth] Register error:", err.message);
+      return res.status(500).json({ error: "Failed to create account. Please try again." });
+    }
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // AUTH: Secure login — bcrypt verify with SHA-256 migration fallback
+  // If an existing user still has a legacy SHA-256 hash, we accept it,
+  // then transparently upgrade their stored hash to bcrypt.
+  // ═══════════════════════════════════════════════════════════════════════
+  app.post("/api/auth/login", async (req: Request, res: Response) => {
+    const { mobile, password } = req.body as { mobile: string; password: string };
+    if (!mobile || !password) {
+      return res.status(400).json({ error: "Missing required fields" });
+    }
+
+    try {
+      const [profile] = await db
+        .select({
+          id: profiles.id,
+          displayName: profiles.displayName,
+          mobileNumber: profiles.mobileNumber,
+          passwordHash: profiles.passwordHash,
+          totalCoins: profiles.totalCoins,
+          lifetimeEarnings: profiles.lifetimeEarnings,
+        })
+        .from(profiles).where(eq(profiles.mobileNumber, mobile));
+
+      if (!profile) {
+        return res.status(401).json({ error: "Mobile number not found. Please sign up." });
+      }
+      if (!profile.passwordHash) {
+        return res.status(401).json({ error: "This account uses Google Sign-In. Please use that instead." });
+      }
+
+      // ── Primary: bcrypt verify ────────────────────────────────
+      let passwordValid = await bcrypt.compare(password, profile.passwordHash);
+
+      // ── Fallback: legacy SHA-256 — migrate hash to bcrypt ────
+      if (!passwordValid) {
+        const legacyHash = legacySha256Hash(password);
+        if (profile.passwordHash === legacyHash) {
+          passwordValid = true;
+          // Upgrade: replace legacy SHA-256 with bcrypt silently
+          const newHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+          await db.update(profiles)
+            .set({ passwordHash: newHash })
+            .where(eq(profiles.id, profile.id));
+          console.log(`[Auth] Migrated password hash for user ${profile.id} from SHA-256 to bcrypt`);
+        }
+      }
+
+      if (!passwordValid) {
+        return res.status(401).json({ error: "Incorrect password. Please try again." });
+      }
+
+      return res.json({
+        success: true,
+        userId: profile.id,
+        displayName: profile.displayName,
+        mobileNumber: profile.mobileNumber,
+        totalCoins: Number(profile.totalCoins) || 0,
+        lifetimeEarnings: Number(profile.lifetimeEarnings) || 0,
+      });
+    } catch (err: any) {
+      console.error("[Auth] Login error:", err.message);
+      return res.status(500).json({ error: "An unexpected error occurred." });
+    }
+  });
 
   // ═══════════════════════════════════════════════════════════════════════
   // MODULE 2: Atomic coin increment — all balance changes go through here
