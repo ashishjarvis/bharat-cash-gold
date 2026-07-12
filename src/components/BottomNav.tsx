@@ -1,6 +1,6 @@
-import { Home, Trophy, Wallet, Gift } from 'lucide-react';
+import { Home, Trophy, Wallet, Gift, Gamepad2 } from 'lucide-react';
 
-type Tab = 'home' | 'leaderboard' | 'wallet' | 'tasks';
+type Tab = 'home' | 'leaderboard' | 'wallet' | 'tasks' | 'games';
 
 interface BottomNavProps {
   activeTab: Tab;
@@ -9,10 +9,11 @@ interface BottomNavProps {
 
 export const BottomNav = ({ activeTab, onTabChange }: BottomNavProps) => {
   const tabs = [
-    { id: 'home' as Tab, icon: Home, label: 'Home' },
-    { id: 'tasks' as Tab, icon: Gift, label: 'Tasks' },
-    { id: 'leaderboard' as Tab, icon: Trophy, label: 'Rank' },
-    { id: 'wallet' as Tab, icon: Wallet, label: 'Wallet' },
+    { id: 'home'        as Tab, icon: Home,     label: 'Home' },
+    { id: 'tasks'       as Tab, icon: Gift,      label: 'Tasks' },
+    { id: 'games'       as Tab, icon: Gamepad2,  label: 'Games' },
+    { id: 'leaderboard' as Tab, icon: Trophy,    label: 'Rank' },
+    { id: 'wallet'      as Tab, icon: Wallet,    label: 'Wallet' },
   ];
 
   return (
