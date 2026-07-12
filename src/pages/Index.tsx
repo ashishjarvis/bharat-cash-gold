@@ -16,6 +16,7 @@ import { TreasureChest }   from '@/components/TreasureChest';
 import { SurveyButton }    from '@/components/SurveyButton';
 import { CpxSurvey }       from '@/components/CpxSurvey';
 import { UnityTestBanner } from '@/components/UnityAdsStatus';
+import GameZone from '@/components/GameZone';
 import LoadingScreen from '@/components/LoadingScreen';
 import { useCoinsDB }      from '@/hooks/useCoinsDB';
 import { useSimpleAuth }   from '@/contexts/SimpleAuthContext';
@@ -23,7 +24,7 @@ import { initializeUnityAds, unityAdsDiagnostics } from '@/lib/unityAds';
 import { initializeAdMob, adMobDiagnostics } from '@/lib/admob';
 import { toast } from 'sonner';
 
-type Tab = 'home' | 'leaderboard' | 'wallet' | 'tasks';
+type Tab = 'home' | 'leaderboard' | 'wallet' | 'tasks' | 'games';
 
 // ── Server-side ad eligibility check ─────────────────────────
 const checkAdLimits = async (userId: string): Promise<{ allowed: boolean; reason?: string }> => {
@@ -178,6 +179,9 @@ const Index = () => {
             onWithdraw={withdraw}
           />
         );
+
+      case 'games':
+        return <GameZone onCoinsEarned={(amt) => addCoins(amt, 'gamezone_reward')} />;
 
       default:
         return null;
