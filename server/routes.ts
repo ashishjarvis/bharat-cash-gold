@@ -67,6 +67,19 @@ const requireAdmin = async (req: Request, res: Response, next: NextFunction): Pr
 export function registerRoutes(app: Express): Server {
 
   // ═══════════════════════════════════════════════════════════════════════
+  // ── Public: admin status check (no middleware — used by Admin.tsx on mount) ──
+  // Deliberately NOT under /api/admin/* so it isn't blocked by requireAdmin.
+  app.get("/api/check-admin", async (req: Request, res: Response) => {
+    const userId = req.query.userId as string;
+    if (!userId) return res.json({ isAdmin: false });
+    try {
+      const isAdmin = await verifyAdmin(userId);
+      return res.json({ isAdmin });
+    } catch {
+      return res.json({ isAdmin: false });
+    }
+  });
+
   // SECURITY: Admin middleware — gates ALL /api/admin/* routes server-side
   // Any request to /api/admin/* that doesn't pass verifyAdmin() gets 403.
   // This runs BEFORE individual route handlers are evaluated.
