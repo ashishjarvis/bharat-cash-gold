@@ -51,7 +51,7 @@ const Admin = () => {
     const checkAdmin = async () => {
       try {
         // Use the server-side check which honours BOTH is_admin flag AND hardcoded mobile
-        const res  = await fetch(`/api/admin/check?userId=${user.id}`);
+        const res  = await fetch(`/api/check-admin?userId=${user.id}`);
         const json = await res.json();
 
         if (!json.isAdmin) {
